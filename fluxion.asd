@@ -3,9 +3,9 @@
 
 (defsystem "fluxion"
   :name "fluxion"
-  :version "0.1.0"
+  :version "1.0.0"
   :author "Glenn Thompson"
-  :licence "BSD-3-Clause"
+  :licence "MIT"
   :description "A Common Lisp framework for live, server-driven reactive web interfaces built around CLOS."
   :depends-on ("alexandria"
                "spinneret"
@@ -54,7 +54,8 @@
      (:file "test-components")
      (:file "test-server")
      (:file "test-router")
-     (:file "test-validation")))))
+     (:file "test-validation")
+     (:file "test-observability")))))
 
 (defsystem "fluxion/client"
   :name "fluxion-client"

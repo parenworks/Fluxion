@@ -59,6 +59,10 @@
   :description "Session reaping under load."
   :in fluxion-suite)
 
+(def-suite observability-suite
+  :description "Request logging, health endpoint, SSE stress."
+  :in fluxion-suite)
+
 (defun run-all-tests ()
   "Run the full Fluxion test suite. Returns T if all tests pass."
   (run! 'fluxion-suite))

@@ -228,18 +228,27 @@ If authenticated but lacking the role, returns 403 (or redirects to FORBIDDEN-UR
    (server     :initarg :server
                :accessor app-server
                :initform :woo
-               :documentation "Clack server backend. :woo (default) or :hunchentoot."))
+               :documentation "Clack server backend. :woo (default) or :hunchentoot.")
+   (started-at :initform nil
+               :accessor app-started-at
+               :documentation "Universal time when the server was started.")
+   (request-log :initarg :request-log
+                :accessor app-request-log
+                :initform t
+                :documentation "When non-nil, log every request to *standard-output*."))
   (:documentation "Top-level Fluxion application."))
 
 (defun make-fluxion-app (&key (port 5000) static-dir (session-ttl 3600)
-                             (reaper-interval 60) (server :woo))
+                             (reaper-interval 60) (server :woo) (request-log t))
   "Create a new Fluxion application instance.
 SERVER is the Clack backend: :woo (default) or :hunchentoot.
-Woo uses libev for async I/O. Install libev-dev to use it."
+Woo uses libev for async I/O. Install libev-dev to use it.
+REQUEST-LOG: when non-nil (default T), logs every request."
   (make-instance 'fluxion-app :port port :static-dir static-dir
                               :session-ttl session-ttl
                               :reaper-interval reaper-interval
-                              :server server))
+                              :server server
+                              :request-log request-log))
 
 ;;; -------------------------------------------------------
 ;;; Component registry
@@ -654,6 +663,68 @@ Example:
               (lambda ,args ,@body)))
 
 ;;; -------------------------------------------------------
+;;; Request logging
+;;; -------------------------------------------------------
+
+(defun format-log-timestamp ()
+  "Return a timestamp string for log output."
+  (multiple-value-bind (sec min hour day month year)
+      (decode-universal-time (get-universal-time))
+    (format nil "~4,'0D-~2,'0D-~2,'0D ~2,'0D:~2,'0D:~2,'0D"
+            year month day hour min sec)))
+
+(defun log-request (method path status elapsed-ms)
+  "Log a request in structured format."
+  (format t "[~A] ~A ~A ~D ~,1Fms~%"
+          (format-log-timestamp)
+          method path status elapsed-ms))
+
+;;; -------------------------------------------------------
+;;; Health endpoint
+;;; -------------------------------------------------------
+
+(defun app-uptime-seconds (app)
+  "Return seconds since the app was started, or 0 if not started."
+  (if (app-started-at app)
+      (- (get-universal-time) (app-started-at app))
+      0))
+
+(defun app-session-count (app)
+  "Return the current number of active sessions."
+  (hash-table-count (app-sessions app)))
+
+(defun app-sse-connection-count (app)
+  "Return the number of sessions with active (not closed) event queues."
+  (let ((count 0))
+    (bt:with-lock-held ((app-session-lock app))
+      (maphash (lambda (sid session)
+                 (declare (ignore sid))
+                 (let ((q (session-event-queue session)))
+                   (when (and q (not (eq-closed-p q)))
+                     (incf count))))
+               (app-sessions app)))
+    count))
+
+(defun health-response (app)
+  "Return a JSON health check response."
+  (let ((uptime (app-uptime-seconds app)))
+    (list 200
+          '(:content-type "application/json"
+            :cache-control "no-cache")
+          (list (cl-json:encode-json-to-string
+                 `((:status . "ok")
+                   (:uptime_seconds . ,uptime)
+                   (:uptime_human . ,(format nil "~Dd ~Dh ~Dm ~Ds"
+                                             (floor uptime 86400)
+                                             (floor (mod uptime 86400) 3600)
+                                             (floor (mod uptime 3600) 60)
+                                             (mod uptime 60)))
+                   (:sessions . ,(app-session-count app))
+                   (:sse_connections . ,(app-sse-connection-count app))
+                   (:server . ,(string-downcase (symbol-name (app-server app))))
+                   (:port . ,(app-port app))))))))
+
+;;; -------------------------------------------------------
 ;;; Main Clack application handler
 ;;; -------------------------------------------------------
 
@@ -663,11 +734,23 @@ PAGE-HANDLER is a function of (app session env) that returns the initial
 HTML page response."
   (lambda (env)
     (let ((path (get-request-path env))
-          (method (get-request-method env)))
+          (method (get-request-method env))
+          (start-time (get-internal-real-time)))
+      (flet ((finish-request (response)
+               (when (and (app-request-log app) (listp response))
+                 (let ((elapsed-ms (* 1000.0
+                                      (/ (- (get-internal-real-time) start-time)
+                                         (float internal-time-units-per-second)))))
+                   (log-request method path (first response) elapsed-ms)))
+               response))
       (cond
+        ;; Health check (no session needed)
+        ((and (eq method :get) (string= path "/health"))
+         (finish-request (health-response app)))
+
         ;; Static files (no session needed)
         ((alexandria:starts-with-subseq "/static/" path)
-         (static-file-handler app env))
+         (finish-request (static-file-handler app env)))
 
         ;; Everything else needs a session
         (t
@@ -741,9 +824,10 @@ HTML page response."
                      (t
                       (funcall page-handler app session env)))))
              ;; Set session cookie on new sessions (skip for streaming responses)
-             (if (and new-session-p (listp response))
-                 (set-session-cookie response session)
-                 response))))))))
+             (let ((final (if (and new-session-p (listp response))
+                              (set-session-cookie response session)
+                              response)))
+               (finish-request final))))))))))
 
 ;;; -------------------------------------------------------
 ;;; Start / Stop
@@ -758,6 +842,7 @@ HTML page response."
     (setf (app-port app) port))
   (when server-supplied-p
     (setf (app-server app) server))
+  (setf (app-started-at app) (get-universal-time))
   (let ((clack-app (make-clack-app app page-handler)))
     (setf (app-handler app)
           (clack:clackup clack-app

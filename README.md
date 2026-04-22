@@ -153,6 +153,9 @@ Options on `make-fluxion-app`:
 - **`:server :woo`** - Clack backend (default). Woo uses libev for async I/O. Use `:hunchentoot` for development if you prefer its debug mode. See [GUIDE.md](GUIDE.md).
 - **`:session-ttl 3600`** - seconds before idle sessions expire (default 1 hour).
 - **`:reaper-interval 60`** - how often the background reaper checks for expired sessions.
+- **`:request-log t`** - structured request logging to `*standard-output*`. Set to `nil` to disable.
+
+Every app exposes `GET /health` automatically (no session required) returning JSON with uptime, session count, SSE connection count, and server backend. See [DEPLOYMENT.md](DEPLOYMENT.md) for production setup.
 
 The reaper runs in a background thread and uses a stop flag for graceful shutdown (no `destroy-thread`). When a session is reaped, its SSE event queue is closed so the streaming thread unblocks and terminates cleanly. The reaper catches and logs errors instead of crashing, so a single corrupt session won't take down the cleanup loop.
 
@@ -559,7 +562,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment with Caddy, nginx, 
 
 - [Spinneret](https://github.com/ruricolist/spinneret) - HTML generation
 - [Alexandria](https://gitlab.common-lisp.net/alexandria/alexandria) - utilities
-- [Clack](https://github.com/fukamachi/clack) / [Hunchentoot](https://edicl.github.io/hunchentoot/) - web server
+- [Clack](https://github.com/fukamachi/clack) / [Woo](https://github.com/fukamachi/woo) / [Hunchentoot](https://edicl.github.io/hunchentoot/) - web server (Woo default)
 - [cl-json](https://cl-json.common-lisp.dev/) - JSON encoding/decoding
 - [Parenscript](https://common-lisp.net/project/parenscript/) - Lisp-to-JavaScript compiler
 - [Babel](https://github.com/cl-babel/babel) - charset encoding
@@ -576,8 +579,9 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment with Caddy, nginx, 
 - **v0.6** - DOM morphing, defcomponent, persistent SSE server-push
 - **v0.7** - CSRF protection, test suite, authentication, routing, form validation
 - **v0.8** - glitch-free transactions, height-based topological scheduling
-- **v0.9** - thread-safe cell graph, concurrent writer support (current)
+- **v0.9** - thread-safe cell graph, concurrent writer support
+- **v1.0** - Woo backend, health endpoint, request logging, SSE stress testing, GUIDE.md (current)
 
 ## Licence
 
-BSD-3-Clause
+MIT - see [LICENSE](LICENSE).

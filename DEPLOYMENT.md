@@ -5,21 +5,25 @@ This guide covers deploying a Fluxion application behind a reverse proxy. Fluxio
 ## Architecture
 
 ```text
-Browser <---> Reverse Proxy (nginx/Caddy) <---> Fluxion (Hunchentoot on port 5000)
+Browser <---> Reverse Proxy (nginx/Caddy) <---> Fluxion (Woo on port 5000)
                   |
              TLS termination
              Static caching
              SSE passthrough
 ```
 
-The reverse proxy handles TLS, serves cached static files, and forwards requests to Hunchentoot. The critical thing is that SSE connections on `/sse` must be passed through without buffering.
+The reverse proxy handles TLS, serves cached static files, and forwards requests to Woo (or Hunchentoot). The critical thing is that SSE connections on `/sse` must be passed through without buffering.
 
 ## Building for Production
 
 ```lisp
-;; Load and start your app
+;; Load and start your app (Woo is the default backend)
 (ql:quickload :my-fluxion-app)
 (my-app:start :port 5000)
+
+;; Or explicitly choose a backend
+(my-app:start :port 5000 :server :woo)        ; production (default)
+(my-app:start :port 5000 :server :hunchentoot) ; debugging
 ```
 
 For a standalone binary, use SBCL's `save-lisp-and-die`:
@@ -29,7 +33,15 @@ For a standalone binary, use SBCL's `save-lisp-and-die`:
   :toplevel (lambda ()
               (my-app:start :port 5000)
               (loop (sleep 3600)))
-  :executable t)
+  :executable t
+  :compression t)
+```
+
+Woo requires `libev-dev` at runtime. Install it before deploying:
+
+```bash
+# Debian/Ubuntu
+sudo apt install libev-dev
 ```
 
 Run it as a systemd service (see below).
@@ -202,15 +214,58 @@ For production, tune session settings:
 ```lisp
 (fluxion.server:make-fluxion-app
  :port 5000
+ :server :woo             ; default, libev event loop
  :session-ttl 3600        ; 1 hour idle timeout
  :reaper-interval 60      ; check every minute
+ :request-log t           ; structured request logging (default)
  :static-dir "/opt/myapp/static/")
 ```
 
 The session reaper runs in a background thread and removes expired sessions automatically.
 
+## Health Endpoint
+
+Every Fluxion app exposes `GET /health` automatically. No session or authentication required.
+
+```bash
+curl http://localhost:5000/health
+```
+
+```json
+{
+  "status": "ok",
+  "uptimeSeconds": 3661,
+  "uptimeHuman": "0d 1h 1m 1s",
+  "sessions": 42,
+  "sseConnections": 38,
+  "server": "woo",
+  "port": 5000
+}
+```
+
+Use this for:
+
+- **Load balancer health checks** (nginx `proxy_pass` with health check, Caddy `lb_policy`, etc.)
+- **Container orchestration** (Docker `HEALTHCHECK`, Kubernetes liveness/readiness probes)
+- **Monitoring dashboards** (poll `/health` and alert on non-200 or high session counts)
+
+## Request Logging
+
+Every request is logged to `*standard-output*` by default:
+
+```text
+[2026-04-22 19:32:10] GET / 200 2.3ms
+[2026-04-22 19:32:10] POST /action/counter/increment 200 0.8ms
+[2026-04-22 19:32:10] GET /health 200 0.1ms
+```
+
+SSE streaming connections are not logged (they return a callback, not a status code). Pipe stdout to a log file or log aggregator in production.
+
+Disable with `:request-log nil` if you handle logging elsewhere.
+
 ## Checklist
 
+- [ ] Install `libev-dev` if using Woo (default)
 - [ ] Build the client runtime: `(fluxion.client:build-client)`
 - [ ] Set appropriate `:session-ttl` for your use case
 - [ ] Pass `:csrf-token` to `render-page` in all page handlers
@@ -219,6 +274,8 @@ The session reaper runs in a background thread and removes expired sessions auto
 - [ ] Static files served with cache headers
 - [ ] TLS configured (Let's Encrypt or your own certs)
 - [ ] Application runs as a systemd service with `Restart=always`
+- [ ] Health check configured: `curl http://localhost:5000/health`
+- [ ] Request logs piped to a file or log aggregator
 - [ ] Test SSE by opening the browser console and checking for `EventSource` connection
 
 ## Troubleshooting

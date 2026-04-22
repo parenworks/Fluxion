@@ -421,6 +421,57 @@ This exercises:
 
 ---
 
+## Observability
+
+### Request Logging
+
+Every request is logged to `*standard-output*` by default with method, path, status code, and elapsed time:
+
+```text
+[2026-04-22 19:32:10] GET / 200 2.3ms
+[2026-04-22 19:32:10] POST /action/counter/increment 200 0.8ms
+[2026-04-22 19:32:10] GET /health 200 0.1ms
+[2026-04-22 19:32:11] GET /static/style.css 200 0.4ms
+```
+
+SSE streaming connections are not logged (they return a callback, not a status code). Disable logging with `:request-log nil`:
+
+```lisp
+(fluxion.server:make-fluxion-app :request-log nil)
+```
+
+### Health Endpoint
+
+Every Fluxion app exposes `GET /health` with no session required. Useful for load balancer health checks and container orchestration:
+
+```bash
+curl http://localhost:5000/health
+```
+
+```json
+{
+  "status": "ok",
+  "uptimeSeconds": 3661,
+  "uptimeHuman": "0d 1h 1m 1s",
+  "sessions": 42,
+  "sseConnections": 38,
+  "server": "woo",
+  "port": 5000
+}
+```
+
+### Programmatic Metrics
+
+```lisp
+(fluxion.server:app-uptime-seconds app)       ;=> 3661
+(fluxion.server:app-session-count app)         ;=> 42
+(fluxion.server:app-sse-connection-count app)  ;=> 38
+```
+
+These can be exposed to Prometheus, Grafana, or any monitoring system by adding a `/metrics` route.
+
+---
+
 ## Troubleshooting
 
 **SSE connections drop immediately:** Check your reverse proxy config. nginx needs `proxy_buffering off` and a long `proxy_read_timeout`. Caddy works without changes.

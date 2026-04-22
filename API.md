@@ -187,10 +187,37 @@ For observing consistent state across multiple cells, use a computed cell rather
 - `:session-ttl` - seconds before idle sessions expire (default 3600).
 - `:reaper-interval` - seconds between reaper runs (default 60).
 - `:server` - Clack backend keyword. `:woo` (default) uses libev for async I/O and handles many concurrent SSE connections with minimal thread overhead. `:hunchentoot` is available as an alternative with better debug error pages.
+- `:request-log` - when non-nil (default `T`), logs every request to `*standard-output*` with method, path, status code, and elapsed time in milliseconds.
 
 **`start (app page-handler &key port server)`** - start the server. `page-handler` is a function `(app session env)` that returns a Clack response list `(status headers body)`. Both `:port` and `:server` can override the values set in `make-fluxion-app`.
 
 **`stop (app)`** - stop the server and the session reaper.
+
+### Health Endpoint
+
+A built-in `GET /health` endpoint is available on every Fluxion app. It returns JSON with no session required:
+
+```json
+{
+  "status": "ok",
+  "uptimeSeconds": 3661,
+  "uptimeHuman": "0d 1h 1m 1s",
+  "sessions": 42,
+  "sseConnections": 38,
+  "server": "woo",
+  "port": 5000
+}
+```
+
+### Observability
+
+**`app-uptime-seconds (app)`** - seconds since the server was started.
+
+**`app-session-count (app)`** - current number of active sessions.
+
+**`app-sse-connection-count (app)`** - number of sessions with active (not closed) SSE event queues.
+
+**`log-request (method path status elapsed-ms)`** - write a structured log line to `*standard-output*`.
 
 ### Component Registry
 

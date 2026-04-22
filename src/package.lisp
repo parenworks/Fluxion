@@ -185,7 +185,15 @@
    #:close-event-queue
    #:ensure-event-queue
    #:start-session-reaper
-   #:stop-session-reaper))
+   #:stop-session-reaper
+   #:app-request-log
+   #:app-started-at
+   #:app-uptime-seconds
+   #:app-session-count
+   #:app-sse-connection-count
+   #:health-response
+   #:log-request
+   #:format-log-timestamp))
 
 (defpackage #:fluxion
   (:use #:cl)
