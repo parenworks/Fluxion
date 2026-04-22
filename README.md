@@ -15,7 +15,7 @@ The reactive layer is called Lattice. Cells hold values, computed cells derive f
 - **HTML over the wire** - the server sends rendered HTML fragments, not JSON.
 - **SSE patches** - Server-Sent Events carry patch instructions (morph, append, remove) as JSON payloads.
 - **DOM morphing** - the client diffs the new HTML against the live DOM tree and only updates what changed, preserving input focus, cursor position, and scroll state.
-- **Persistent SSE** - each browser opens a long-lived EventSource connection. The server can push updates at any time without the user doing anything.
+- **Persistent SSE** - each browser opens a long-lived EventSource connection. The server can push updates at any time without the user doing anything. Reconnects automatically with exponential backoff if the connection drops.
 - **Parenscript client** - the browser runtime is authored in Parenscript and compiled to one small JS file.
 - **No JavaScript** - application developers write none. Behaviour is expressed with `data-*` attributes.
 
@@ -303,6 +303,19 @@ This is how the counter example pushes a ticking clock to all sessions from a ba
 ```
 
 The browser receives the SSE event and morphs the clock element. No polling, no WebSocket setup, no client code.
+
+### Connection Recovery
+
+The SSE connection recovers automatically when it drops. The client uses exponential backoff with jitter:
+
+- **First retry** at ~1 second
+- **Doubles each attempt** up to a 30 second cap
+- **Jitter** prevents multiple tabs from reconnecting in sync
+- **Visual banner** shows connection status (amber while reconnecting, green flash on success)
+- **Manual reconnect** button appears after 50 failed attempts
+- **Backoff resets** immediately when the connection succeeds
+
+No configuration needed. The reconnect logic is built into the client runtime. Behind a reverse proxy (Caddy, nginx), make sure SSE responses are not buffered - the server sends `X-Accel-Buffering: no` to handle nginx automatically.
 
 ## DOM Morphing
 

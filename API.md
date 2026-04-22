@@ -273,6 +273,23 @@ These functions push events to a session's persistent SSE connection (the `/sse`
 
 **`push-component-patch (session component &key mode)`** - re-render the component and push a patch event to the session. Marks the component dirty and forces the patch.
 
+### SSE Connection Recovery
+
+The client automatically reconnects when the SSE connection drops. The reconnect strategy uses exponential backoff with jitter:
+
+- Base delay: 1 second, doubles each attempt, capped at 30 seconds
+- Jitter: 50-100% of the computed delay (prevents thundering herd)
+- Maximum 50 attempts before giving up
+- Backoff resets to 1 second on successful reconnection
+
+Visual feedback:
+
+- Amber banner: "Connection lost. Reconnecting in Ns..."
+- Green flash: "Reconnected" (auto-dismisses after 2 seconds)
+- Red banner with "Reconnect" button: shown after max retries exhausted
+
+The client exposes `fluxionReconnect()` as a global function for the manual reconnect button. Application code can also call it programmatically from a `fluxion-script` event if needed.
+
 ### SSE Helpers
 
 **`send-event (stream event)`** - write a single SSE event to a stream (used in action response bodies).

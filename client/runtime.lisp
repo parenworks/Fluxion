@@ -28,6 +28,12 @@
     (defvar *fluxion-event-source* nil)
     (defvar *fluxion-initialized* false)
     (defvar *fluxion-sse-reconnect-timer* nil)
+    (defvar *fluxion-sse-retry-delay* 1000)
+    (defvar *fluxion-sse-retry-count* 0)
+    (defvar *fluxion-sse-max-retries* 50)
+    (defvar *fluxion-sse-base-delay* 1000)
+    (defvar *fluxion-sse-max-delay* 30000)
+    (defvar *fluxion-sse-was-connected* false)
 
     (defun fluxion-get-csrf-token ()
       "Read the CSRF token from the meta tag in the page head."
@@ -495,11 +501,91 @@ ROOT defaults to document."
           (chain toast (remove)))))
 
     ;;; ---------------------------------------------------
-    ;;; Persistent SSE connection
+    ;;; Connection status banner
     ;;; ---------------------------------------------------
 
+    (defun fluxion-show-connection-status (state &optional detail)
+      "Show or update the connection status banner.
+STATE is one of: reconnecting, lost, connected."
+      (let ((banner (fluxion-qs "#fluxion-connection-banner")))
+        (when (string= state "connected")
+          ;; Remove banner after brief 'reconnected' flash
+          (when banner
+            (setf (@ banner inner-h-t-m-l)
+                  "<span>&#x2713; Reconnected</span>")
+            (setf (@ banner style background) "#2d8a4e")
+            (set-timeout (lambda ()
+                           (let ((b (fluxion-qs "#fluxion-connection-banner")))
+                             (when b (chain b (remove)))))
+                         2000))
+          (return-from fluxion-show-connection-status))
+        ;; Create banner if not present
+        (unless banner
+          (setf banner (chain document (create-element "div")))
+          (setf (@ banner id) "fluxion-connection-banner")
+          (setf (@ banner style css-text)
+                (+ "position:fixed;top:0;left:0;right:0;z-index:10000;"
+                   "padding:6px 12px;font-size:0.8rem;font-family:sans-serif;"
+                   "text-align:center;color:#fff;transition:background 0.3s"))
+          (chain document body (append-child banner)))
+        (cond
+          ((string= state "reconnecting")
+           (setf (@ banner style background) "#b87a1a")
+           (setf (@ banner inner-h-t-m-l)
+                 (+ "<span>Connection lost. Reconnecting"
+                    (if detail (+ " in " detail "s") "")
+                    "...</span>")))
+          ((string= state "lost")
+           (setf (@ banner style background) "#d9534f")
+           (setf (@ banner inner-h-t-m-l)
+                 (+ "<span>Connection lost. </span>"
+                    "<button onclick=\"fluxionReconnect()\" style=\""
+                    "background:#fff;color:#d9534f;border:none;border-radius:4px;"
+                    "padding:2px 10px;margin-left:8px;cursor:pointer;font-size:0.8rem"
+                    "\">Reconnect</button>"))))))
+
+    ;;; ---------------------------------------------------
+    ;;; Persistent SSE connection with exponential backoff
+    ;;; ---------------------------------------------------
+
+    (defun fluxion-compute-retry-delay ()
+      "Compute the next retry delay with exponential backoff and jitter."
+      (let* ((exp-delay (* *fluxion-sse-base-delay*
+                           (chain -math (pow 2 *fluxion-sse-retry-count*))))
+             (capped (chain -math (min exp-delay *fluxion-sse-max-delay*)))
+             (jitter (* capped (+ 0.5 (* (chain -math (random)) 0.5)))))
+        (chain -math (floor jitter))))
+
+    (defun fluxion-schedule-reconnect ()
+      "Schedule an SSE reconnection with exponential backoff."
+      (when *fluxion-sse-reconnect-timer*
+        (clear-timeout *fluxion-sse-reconnect-timer*)
+        (setf *fluxion-sse-reconnect-timer* nil))
+      (if (>= *fluxion-sse-retry-count* *fluxion-sse-max-retries*)
+          (progn
+            (chain console (error
+              (+ "Fluxion: gave up reconnecting after "
+                 *fluxion-sse-max-retries* " attempts")))
+            (fluxion-show-connection-status "lost"))
+          (let ((delay (fluxion-compute-retry-delay)))
+            (incf *fluxion-sse-retry-count*)
+            (let ((secs (chain -math (ceil (/ delay 1000)))))
+              (chain console (warn
+                (+ "Fluxion: reconnecting in " secs "s (attempt "
+                   *fluxion-sse-retry-count* ")")))
+              (fluxion-show-connection-status "reconnecting" secs))
+            (setf *fluxion-sse-reconnect-timer*
+                  (set-timeout fluxion-connect-sse delay)))))
+
+    (defun fluxion-reconnect ()
+      "Manual reconnect - resets retry state and connects immediately."
+      (setf *fluxion-sse-retry-count* 0)
+      (setf *fluxion-sse-retry-delay* *fluxion-sse-base-delay*)
+      (fluxion-connect-sse))
+
     (defun fluxion-connect-sse ()
-      "Open a persistent EventSource connection to /sse for server-push."
+      "Open a persistent EventSource connection to /sse for server-push.
+Uses exponential backoff with jitter on connection failure."
       (when *fluxion-event-source*
         (chain *fluxion-event-source* (close))
         (setf *fluxion-event-source* nil))
@@ -530,15 +616,22 @@ ROOT defaults to document."
         (chain source (add-event-listener "fluxion-redirect"
                         (lambda (e)
                           (fluxion-handle-redirect (chain -j-s-o-n (parse (@ e data)))))))
-        ;; Reconnect on error after a short delay
+        ;; Connection opened successfully - reset backoff
+        (setf (@ source onopen)
+              (lambda ()
+                (chain console (log "Fluxion: SSE connection opened"))
+                (when *fluxion-sse-was-connected*
+                  ;; Show reconnected flash only if we had a previous connection
+                  (fluxion-show-connection-status "connected"))
+                (setf *fluxion-sse-was-connected* t)
+                (setf *fluxion-sse-retry-count* 0)
+                (setf *fluxion-sse-retry-delay* *fluxion-sse-base-delay*)))
+        ;; Connection lost - schedule reconnect with backoff
         (setf (@ source onerror)
               (lambda ()
-                (chain console (warn "Fluxion: SSE connection lost, reconnecting..."))
                 (chain source (close))
                 (setf *fluxion-event-source* nil)
-                (setf *fluxion-sse-reconnect-timer*
-                      (set-timeout fluxion-connect-sse 3000))))
-        (chain console (log "Fluxion: SSE connection opened"))))
+                (fluxion-schedule-reconnect)))))
 
     ;;; ---------------------------------------------------
     ;;; Initialization
