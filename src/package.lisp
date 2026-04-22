@@ -170,6 +170,7 @@
    #:dispatch-route
    #:router-handler
    #:app-handler
+   #:app-server
    #:app-session-lock
    #:app-sessions
    #:push-event

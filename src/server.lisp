@@ -224,14 +224,22 @@ If authenticated but lacking the role, returns 403 (or redirects to FORBIDDEN-UR
                :documentation "The running Clack handler (used for stopping).")
    (port       :initarg :port
                :accessor app-port
-               :initform 5000))
+               :initform 5000)
+   (server     :initarg :server
+               :accessor app-server
+               :initform :hunchentoot
+               :documentation "Clack server backend. :hunchentoot (default) or :woo."))
   (:documentation "Top-level Fluxion application."))
 
-(defun make-fluxion-app (&key (port 5000) static-dir (session-ttl 3600) (reaper-interval 60))
-  "Create a new Fluxion application instance."
+(defun make-fluxion-app (&key (port 5000) static-dir (session-ttl 3600)
+                             (reaper-interval 60) (server :hunchentoot))
+  "Create a new Fluxion application instance.
+SERVER is the Clack backend: :hunchentoot (default) for development,
+:woo for production (requires libev)."
   (make-instance 'fluxion-app :port port :static-dir static-dir
                               :session-ttl session-ttl
-                              :reaper-interval reaper-interval))
+                              :reaper-interval reaper-interval
+                              :server server))
 
 ;;; -------------------------------------------------------
 ;;; Component registry
@@ -744,14 +752,17 @@ HTML page response."
 (defgeneric start (app page-handler &key)
   (:documentation "Start the Fluxion application server."))
 
-(defmethod start ((app fluxion-app) page-handler &key (port nil port-supplied-p))
+(defmethod start ((app fluxion-app) page-handler &key (port nil port-supplied-p)
+                                                      (server nil server-supplied-p))
   (when port-supplied-p
     (setf (app-port app) port))
+  (when server-supplied-p
+    (setf (app-server app) server))
   (let ((clack-app (make-clack-app app page-handler)))
     (setf (app-handler app)
           (clack:clackup clack-app
                          :port (app-port app)
-                         :server :hunchentoot))
+                         :server (app-server app)))
     (start-session-reaper app)
     app))
 

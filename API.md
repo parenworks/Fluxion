@@ -180,14 +180,15 @@ For observing consistent state across multiple cells, use a computed cell rather
 
 ### Application
 
-**`make-fluxion-app (&key port static-dir session-ttl reaper-interval)`** - create a new Fluxion application.
+**`make-fluxion-app (&key port static-dir session-ttl reaper-interval server)`** - create a new Fluxion application.
 
 - `:port` - server port (default 5000).
 - `:static-dir` - directory for serving static files under `/static/`.
 - `:session-ttl` - seconds before idle sessions expire (default 3600).
 - `:reaper-interval` - seconds between reaper runs (default 60).
+- `:server` - Clack backend keyword. `:hunchentoot` (default) for development, `:woo` for production. Woo uses libev for async I/O and handles many concurrent SSE connections with much lower thread overhead.
 
-**`start (app page-handler &key port)`** - start the server. `page-handler` is a function `(app session env)` that returns a Clack response list `(status headers body)`.
+**`start (app page-handler &key port server)`** - start the server. `page-handler` is a function `(app session env)` that returns a Clack response list `(status headers body)`. Both `:port` and `:server` can override the values set in `make-fluxion-app`.
 
 **`stop (app)`** - stop the server and the session reaper.
 
