@@ -23,7 +23,10 @@ The server owns the state. The browser just follows instructions.
 
 ;; Start the counter demo
 (fluxion.examples.counter:start-counter)
+;; Open http://localhost:5000
 
+;; Or the todo list
+(fluxion.examples.todo:start-todo)
 ;; Open http://localhost:5000
 ```
 
@@ -37,16 +40,17 @@ fluxion/
 │   ├── protocol.lisp        ; SSE/JSON event protocol
 │   ├── events.lisp          ; Event type constructors
 │   ├── signals.lisp         ; Server-side signal store
-│   ├── components.lisp      ; CLOS component model
+│   ├── components.lisp      ; CLOS component model, defaction, dirty tracking
 │   ├── render.lisp          ; Spinneret rendering helpers
-│   └── server.lisp          ; Clack/Hunchentoot integration
+│   └── server.lisp          ; Clack/Hunchentoot, sessions, action dispatch
 ├── client/
 │   ├── package.lisp         ; Client package
 │   └── runtime.lisp         ; Parenscript browser runtime
 ├── static/
 │   └── fluxion.js           ; Compiled client runtime (generated)
 ├── examples/
-│   └── counter.lisp         ; Counter demo
+│   ├── counter.lisp         ; Counter demo
+│   └── todo.lisp            ; Todo list demo
 └── README.md
 ```
 
@@ -61,8 +65,43 @@ fluxion/
   (spinneret:with-html-string
     (:div :id (fluxion.components:component-id w)
       (:p (widget-value w))
-      (:button :data-on-click "/widget/update" "Update"))))
+      (:button :data-on-click "/action/my-widget/update" "Update"))))
 ```
+
+## Defining Actions
+
+The `defaction` macro defines CLOS methods for handling component actions. The URL pattern is `/action/{component-id}/{action-name}`. Actions automatically mark the component as dirty and send a patch event after the body runs.
+
+```lisp
+(fluxion.components:defaction my-widget :update (w params)
+  (setf (widget-value w) "Updated!")
+  nil)  ; return nil to auto-patch, or return a list of custom SSE events
+```
+
+## Sessions
+
+Each browser session gets its own component instances. Register a factory function instead of a global instance, and the framework handles the rest.
+
+```lisp
+(let ((app (fluxion.server:make-fluxion-app
+            :port 5000
+            :session-ttl 3600       ; seconds before idle sessions expire (default 1h)
+            :reaper-interval 60)))  ; how often to check for expired sessions (default 60s)
+  ;; Each session gets a fresh my-widget
+  (fluxion.server:register-component-factory app "my-widget"
+    (lambda () (make-instance 'my-widget)))
+
+  ;; Page handler receives (app session env)
+  (fluxion.server:start app
+    (lambda (app session env)
+      (declare (ignore app env))
+      (let ((widget (fluxion.server:session-component session "my-widget")))
+        (list 200
+              '(:content-type "text/html")
+              (list (render-my-page widget)))))))
+```
+
+Expired sessions are automatically cleaned up by a background reaper thread.
 
 ## SSE Protocol
 
@@ -80,16 +119,39 @@ data: {"selector":"#log-list","fragment":"<li>New entry</li>"}
 
 event: fluxion-signals
 data: {"signals":{"count":42,"status":"ready"}}
+
+event: fluxion-script
+data: {"script":"fluxionShowError('Something went wrong')"}
 ```
 
 ## Supported `data-*` Attributes
 
-| Attribute                    | Description                                   |
-| ---------------------------- | --------------------------------------------- |
-| `data-on-click="/path"`      | POST to path on click                         |
-| `data-on-submit="/path"`     | POST form data to path on submit              |
-| `data-bind="signal-name"`    | Two-way bind input value to a client signal   |
-| `data-text="$signal-name"`   | Display signal value as text content          |
+| Attribute | Description |
+| --- | --- |
+| `data-on-click="/path"` | POST to path on click |
+| `data-on-submit="/path"` | POST form data to path on submit |
+| `data-on-change="/path"` | POST on checkbox/select/radio change (sends `checked` or `value`) |
+| `data-on-keydown="/path"` | POST on keydown (sends `value`). Combine with `data-key="Enter"` to filter |
+| `data-on-input="/path"` | POST on each input keystroke (sends `value`) |
+| `data-key="Enter"` | Filter `data-on-keydown` to a specific key |
+| `data-param-foo="bar"` | Include `foo: "bar"` in the POST body. Works with any `data-on-*` |
+| `data-confirm="Are you sure?"` | Show a confirmation dialog before executing a click action |
+| `data-bind="signal-name"` | Two-way bind input value to a client-side signal |
+| `data-text="$signal-name"` | Display signal value as text content |
+
+## Error Handling
+
+Server-side action errors are sent back as SSE script events that trigger an error toast in the browser. The toast auto-dismisses after 8 seconds or can be closed manually. You can also call `fluxionShowError("message")` from JavaScript or from a `fluxion-script` event.
+
+## Dirty Tracking
+
+Components have a `dirty-p` flag and a `last-html` cache. The `defaction` macro marks a component dirty before the body runs. `patch-component` compares the new render against the cache and skips sending if nothing changed. You can force a patch with `:force t`.
+
+```lisp
+(fluxion.components:patch-component my-component)           ; skips if clean
+(fluxion.components:patch-component my-component :force t)   ; always sends
+(fluxion.components:mark-dirty my-component)                 ; manual dirty
+```
 
 ## Dependencies
 
@@ -103,8 +165,8 @@ data: {"signals":{"count":42,"status":"ready"}}
 
 ## Roadmap
 
-- **v0.1** - manual actions and HTML patches (current)
-- **v0.2** - component state and dirty tracking
+- **v0.1** - manual actions and HTML patches
+- **v0.2** - dirty tracking, sessions, defaction, data-* attributes (current)
 - **v0.3** - server-side cells/signals
 - **v0.4** - computed cells
 - **v0.5** - Lattice: propagator-inspired reactive dependency graph
