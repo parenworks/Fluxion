@@ -59,6 +59,24 @@
    #:mark-dirty
    #:clear-dirty))
 
+(defpackage #:fluxion.cells
+  (:use #:cl)
+  (:export
+   #:cell
+   #:make-cell
+   #:cell-value
+   #:cell-name
+   #:cell-watchers
+   #:cell-test
+   #:watch
+   #:unwatch
+   #:connect
+   #:disconnect
+   #:*pending-events*
+   #:collect-event
+   #:collect-events
+   #:drain-pending-events))
+
 (defpackage #:fluxion.render
   (:use #:cl #:fluxion.components)
   (:export
@@ -72,6 +90,7 @@
         #:fluxion.events
         #:fluxion.signals
         #:fluxion.components
+        #:fluxion.cells
         #:fluxion.render)
   (:local-nicknames (#:bt #:bordeaux-threads))
   (:export
@@ -131,6 +150,15 @@
    #:make-signal-store
    #:get-signal
    #:set-signal
+   ;; Cells
+   #:cell
+   #:make-cell
+   #:cell-value
+   #:cell-name
+   #:watch
+   #:unwatch
+   #:connect
+   #:disconnect
    ;; Render
    #:render-to-string
    #:render-page

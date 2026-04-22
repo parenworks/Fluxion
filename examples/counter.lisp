@@ -4,8 +4,8 @@
 ;;;; The "hello world" of Fluxion.  Demonstrates:
 ;;;;   - Defining a CLOS component
 ;;;;   - Rendering with Spinneret
-;;;;   - Handling an action
-;;;;   - Patching the DOM via SSE
+;;;;   - Reactive cells (auto-patching on state change)
+;;;;   - Handling actions via defaction
 ;;;;
 ;;;; Usage:
 ;;;;   (ql:quickload :fluxion/examples)
@@ -24,8 +24,22 @@
 ;;; -------------------------------------------------------
 
 (defclass counter (fluxion.components:component)
-  ((count :initform 0 :accessor counter-count))
+  ((count :accessor counter-count-cell
+          :documentation "A reactive cell holding the count value."))
   (:default-initargs :id "counter"))
+
+(defmethod initialize-instance :after ((c counter) &key)
+  (setf (counter-count-cell c) (fluxion.cells:make-cell 0 :name "count"))
+  ;; Connect the cell to this component - changes auto-patch
+  (fluxion.cells:connect (counter-count-cell c) c))
+
+(defun counter-count (counter)
+  "Read the counter's current count."
+  (fluxion.cells:cell-value (counter-count-cell counter)))
+
+(defun (setf counter-count) (value counter)
+  "Set the counter's count. Triggers auto-patch via the cell."
+  (setf (fluxion.cells:cell-value (counter-count-cell counter)) value))
 
 (defmethod fluxion.components:render ((c counter))
   (spinneret:with-html-string
@@ -43,17 +57,20 @@
 ;;; Actions (via defaction - CLOS dispatch)
 ;;; -------------------------------------------------------
 
+;; Actions just modify the cell - the connected watcher handles patching.
+;; Return :no-patch to suppress defaction's default patch (the cell handles it).
+
 (fluxion.components:defaction counter :increment (c)
   (incf (counter-count c))
-  nil)
+  '())
 
 (fluxion.components:defaction counter :decrement (c)
   (decf (counter-count c))
-  nil)
+  '())
 
 (fluxion.components:defaction counter :reset (c)
   (setf (counter-count c) 0)
-  nil)
+  '())
 
 ;;; -------------------------------------------------------
 ;;; Page

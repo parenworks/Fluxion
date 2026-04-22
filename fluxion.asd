@@ -25,6 +25,7 @@
      (:file "events")
      (:file "signals")
      (:file "components")
+     (:file "cells")
      (:file "render")
      (:file "server")))))
 

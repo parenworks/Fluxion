@@ -248,7 +248,12 @@ Returns a Clack response or NIL if the path is not an action route."
       (let ((component (find-component app component-id :session session)))
         (if component
             (handler-case
-                (let ((events (handle-action component action-keyword params)))
+                (let* ((*pending-events* (list nil))
+                       (action-events (handle-action component action-keyword params))
+                       (cell-events (drain-pending-events))
+                       (events (if (listp action-events)
+                                   (append action-events cell-events)
+                                   action-events)))
                   (if (listp events)
                       (list 200
                             (sse-headers)
