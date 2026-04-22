@@ -2,20 +2,22 @@
 
 **Live server-rendered interfaces for Common Lisp.**
 
-Fluxion lets you build reactive web interfaces using CLOS. You define components as ordinary classes, render them server-side with Spinneret, and stream HTML updates to the browser over Server-Sent Events. The browser runtime is written in Parenscript and compiles down to a single small JS file. Application developers write no JavaScript at all - behaviour is expressed with `data-*` attributes in the HTML.
+Fluxion is a framework for building reactive web UIs entirely in Common Lisp. Components are ordinary CLOS classes. You render them server-side with Spinneret and the framework streams HTML updates to the browser over Server-Sent Events. The browser runtime is written in Parenscript and compiles to a single small JS file. Application developers write zero JavaScript. All behaviour is expressed through `data-*` attributes in the HTML.
 
-The server owns the state. The browser just follows instructions.
+The server owns the state. The browser follows instructions.
 
-The reactive layer is built on Lattice, a propagator-inspired engine where cells hold values, computed cells derive from them automatically, and propagators wire up bidirectional constraints. If you know the Radul/Sussman propagator work, that is the lineage. If you don't, it just means your components react to state changes without you having to wire every update by hand.
+The reactive layer is called Lattice. Cells hold values, computed cells derive from them automatically, and propagators wire up bidirectional constraints. If you know the Radul/Sussman propagator work, that is the lineage. If you don't, it means your components react to state changes without you wiring every update by hand.
 
 ## Core Ideas
 
-- **CLOS components** - UI components are ordinary CLOS classes with `render` and `handle-action` generic functions.
-- **Server-side state** - application logic and state live on the server, not in the browser.
-- **HTML over the wire** - the server sends rendered HTML fragments, not JSON. The browser swaps them into the page.
-- **SSE patches** - Server-Sent Events carry patch instructions (replace, append, remove, morph) as JSON payloads.
-- **Parenscript client** - the browser runtime is authored in Parenscript and compiled to a single small JS file.
-- **Minimal JavaScript** - application developers write no JavaScript. Behaviour is expressed with `data-*` attributes.
+- **CLOS components** - UI components are ordinary CLOS classes with `render` and `handle-action` methods.
+- **Server-side state** - all application logic and state live on the server.
+- **HTML over the wire** - the server sends rendered HTML fragments, not JSON.
+- **SSE patches** - Server-Sent Events carry patch instructions (morph, append, remove) as JSON payloads.
+- **DOM morphing** - the client diffs the new HTML against the live DOM tree and only updates what changed, preserving input focus, cursor position, and scroll state.
+- **Persistent SSE** - each browser opens a long-lived EventSource connection. The server can push updates at any time without the user doing anything.
+- **Parenscript client** - the browser runtime is authored in Parenscript and compiled to one small JS file.
+- **No JavaScript** - application developers write none. Behaviour is expressed with `data-*` attributes.
 
 ## Quick Start
 
@@ -23,45 +25,69 @@ The reactive layer is built on Lattice, a propagator-inspired engine where cells
 ;; Load the system
 (ql:quickload :fluxion/examples)
 
-;; Start the counter demo
-(fluxion.examples.counter:start-counter)
-;; Open http://localhost:5000
+;; Counter with live server-pushed clock
+(fluxion.examples.counter:start-counter :port 5222)
 
-;; Or the todo list
-(fluxion.examples.todo:start-todo)
-;; Open http://localhost:5000
+;; Todo list (sessions, data-* attributes)
+(fluxion.examples.todo:start-todo :port 5222)
 
-;; Or the temperature converter (propagators)
-(fluxion.examples.converter:start-converter)
-;; Open http://localhost:5000
+;; Temperature converter (bidirectional propagators)
+(fluxion.examples.converter:start-converter :port 5222)
 ```
 
 ## Architecture
 
 ```text
 fluxion/
-├── fluxion.asd              ; ASDF system definitions
-├── src/
-│   ├── package.lisp         ; Package definitions
-│   ├── protocol.lisp        ; SSE/JSON event protocol
-│   ├── events.lisp          ; Event type constructors
-│   ├── signals.lisp         ; Server-side signal store
-│   ├── components.lisp      ; CLOS component model, defaction, dirty tracking
-│   ├── render.lisp          ; Spinneret rendering helpers
-│   └── server.lisp          ; Clack/Hunchentoot, sessions, action dispatch
-├── client/
-│   ├── package.lisp         ; Client package
-│   └── runtime.lisp         ; Parenscript browser runtime
-├── static/
-│   └── fluxion.js           ; Compiled client runtime (generated)
-├── examples/
-│   ├── counter.lisp         ; Counter demo (cells + computed)
-│   ├── todo.lisp            ; Todo list demo (sessions, data-* attrs)
-│   └── converter.lisp       ; Temperature converter (bidirectional propagators)
-└── README.md
+  fluxion.asd              ; ASDF system definitions
+  src/
+    package.lisp           ; package definitions
+    protocol.lisp          ; SSE/JSON event protocol
+    events.lisp            ; event type constructors
+    signals.lisp           ; server-side signal store
+    cells.lisp             ; Lattice: cells, computed cells, propagators
+    components.lisp        ; CLOS component model, defaction, defcomponent
+    render.lisp            ; Spinneret rendering helpers
+    server.lisp            ; Clack/Hunchentoot, sessions, SSE push, action dispatch
+  client/
+    package.lisp           ; client package
+    runtime.lisp           ; Parenscript browser runtime (morph, EventSource, data-* binding)
+  static/
+    fluxion.js             ; compiled client runtime (generated by build-client)
+  examples/
+    counter.lisp           ; counter with cells, defcomponent, and server-pushed clock
+    todo.lisp              ; todo list with sessions and data-* attributes
+    converter.lisp         ; temperature converter with bidirectional propagators
 ```
 
-## Defining a Component
+## Defining Components
+
+### The quick way: defcomponent
+
+`defcomponent` generates the class, cell setup, accessor functions, and render method from a single form. Slots marked `:cell t` are backed by reactive cells and automatically connected to the component for live patching.
+
+```lisp
+(fluxion.components:defcomponent counter
+  :id "counter"
+  :slots ((count :cell t :initform 0 :accessor counter-count))
+  :render (spinneret:with-html-string
+            (:div :id (fluxion.components:component-id self)
+              (:p (format nil "Count: ~D" (counter-count self)))
+              (:button :data-on-click "/action/counter/increment" "+1"))))
+```
+
+Inside the `:render` body, `self` is bound to the component instance.
+
+Slot options:
+
+- **`:cell t`** - back the slot with a reactive cell. The accessor reads/writes through `cell-value`.
+- **`:initform value`** - initial value for the cell (or plain slot).
+- **`:accessor name`** - generate reader and writer functions.
+- **`:test fn`** - equality test for the cell (default is `eql`). The cell only notifies watchers if the new value is different.
+
+### The manual way: defclass + defmethod
+
+For full control, define the class and render method yourself:
 
 ```lisp
 (defclass my-widget (fluxion.components:component)
@@ -75,93 +101,126 @@ fluxion/
       (:button :data-on-click "/action/my-widget/update" "Update"))))
 ```
 
-## Defining Actions
+## Actions
 
-The `defaction` macro defines CLOS methods for handling component actions. The URL pattern is `/action/{component-id}/{action-name}`. Actions automatically mark the component as dirty and send a patch event after the body runs.
+The `defaction` macro defines a CLOS method that handles a specific action on a component. The URL pattern is `/action/{component-id}/{action-name}`. Actions automatically mark the component dirty and send a patch after the body runs.
 
 ```lisp
-(fluxion.components:defaction my-widget :update (w params)
-  (setf (widget-value w) "Updated!")
-  nil)  ; return nil to auto-patch, or return a list of custom SSE events
+(fluxion.components:defaction counter :increment (c)
+  (incf (counter-count c))
+  nil)  ; nil = auto-patch. Or return a list of SSE events.
+```
+
+If the slot is cell-backed, the cell's watcher handles the patch. Return `'()` to suppress the default patch and let the cell do it:
+
+```lisp
+(fluxion.components:defaction counter :increment (c)
+  (incf (counter-count c))
+  '())  ; cell watcher handles patching
+```
+
+The second argument to the action body is the params alist (from JSON POST body). Keys are keywords:
+
+```lisp
+(fluxion.components:defaction my-widget :set-value (w params)
+  (let ((v (cdr (assoc :value params))))
+    (setf (widget-value w) v)))
 ```
 
 ## Sessions
 
-Each browser session gets its own component instances. Register a factory function instead of a global instance, and the framework handles the rest.
+Each browser gets its own session with its own component instances. Register a factory function and the framework creates instances per session.
 
 ```lisp
-(let ((app (fluxion.server:make-fluxion-app
-            :port 5000
-            :session-ttl 3600       ; seconds before idle sessions expire (default 1h)
-            :reaper-interval 60)))  ; how often to check for expired sessions (default 60s)
-  ;; Each session gets a fresh my-widget
-  (fluxion.server:register-component-factory app "my-widget"
-    (lambda () (make-instance 'my-widget)))
+(let ((app (fluxion.server:make-fluxion-app :port 5222)))
+  (fluxion.server:register-component-factory app "counter"
+    (lambda () (make-instance 'counter)))
 
-  ;; Page handler receives (app session env)
   (fluxion.server:start app
     (lambda (app session env)
       (declare (ignore app env))
-      (let ((widget (fluxion.server:session-component session "my-widget")))
+      (let ((c (fluxion.server:session-component session "counter")))
         (list 200
               '(:content-type "text/html")
-              (list (render-my-page widget)))))))
+              (list (render-page c)))))))
 ```
 
-Expired sessions are automatically cleaned up by a background reaper thread.
+Session options on `make-fluxion-app`:
 
-## SSE Protocol
+- **`:session-ttl 3600`** - seconds before idle sessions expire (default 1 hour).
+- **`:reaper-interval 60`** - how often the background reaper checks for expired sessions.
 
-Events are sent as standard SSE with JSON payloads:
+## Server Push (Persistent SSE)
 
-```text
-event: fluxion-patch
-data: {"selector":"#my-widget","mode":"morph","fragment":"<div id=\"my-widget\">...</div>"}
+Every browser automatically opens an EventSource connection to `/sse`. The server holds it open and can push updates at any time. No user interaction needed.
 
-event: fluxion-remove
-data: {"selector":"#old-element"}
+### Pushing from server code
 
-event: fluxion-append
-data: {"selector":"#log-list","fragment":"<li>New entry</li>"}
+```lisp
+;; Push a single event
+(fluxion.server:push-event session
+  (fluxion.events:make-patch-event "#clock" new-html :mode "morph"))
 
-event: fluxion-signals
-data: {"signals":{"count":42,"status":"ready"}}
+;; Push multiple events
+(fluxion.server:push-events session events)
 
-event: fluxion-script
-data: {"script":"fluxionShowError('Something went wrong')"}
+;; Re-render a component and push the patch
+(fluxion.server:push-component-patch session my-component)
 ```
 
-## Supported `data-*` Attributes
+### Example: live clock
 
-| Attribute | Description |
-| --- | --- |
-| `data-on-click="/path"` | POST to path on click |
-| `data-on-submit="/path"` | POST form data to path on submit |
-| `data-on-change="/path"` | POST on checkbox/select/radio change (sends `checked` or `value`) |
-| `data-on-keydown="/path"` | POST on keydown (sends `value`). Combine with `data-key="Enter"` to filter |
-| `data-on-input="/path"` | POST on each input keystroke (sends `value`) |
-| `data-key="Enter"` | Filter `data-on-keydown` to a specific key |
-| `data-param-foo="bar"` | Include `foo: "bar"` in the POST body. Works with any `data-on-*` |
-| `data-confirm="Are you sure?"` | Show a confirmation dialog before executing a click action |
-| `data-bind="signal-name"` | Two-way bind input value to a client-side signal |
-| `data-text="$signal-name"` | Display signal value as text content |
+This is how the counter example pushes a ticking clock to all sessions from a background thread:
 
-## Lattice - Reactive Engine
+```lisp
+(bordeaux-threads:make-thread
+  (lambda ()
+    (loop
+      (sleep 1)
+      (let ((now (multiple-value-bind (s min h) (get-decoded-time)
+                   (format nil "~2,'0D:~2,'0D:~2,'0D" h min s))))
+        (maphash (lambda (sid session)
+                   (declare (ignore sid))
+                   (let ((clock (fluxion.server:session-component session "server-clock")))
+                     (when clock
+                       (setf (clock-time clock) now)
+                       (fluxion.server:push-component-patch session clock))))
+                 (fluxion.server:app-sessions app))))))
+```
 
-Fluxion's reactive layer is called Lattice. It has three building blocks.
+The browser receives the SSE event and morphs the clock element. No polling, no WebSocket setup, no client code.
 
-**Cells** hold a value and notify watchers when it changes.
+## DOM Morphing
+
+When the server sends a patch, the client does not replace the entire element with `innerHTML`. Instead it walks the old and new DOM trees node-by-node:
+
+- Matching elements get their attributes synced (only the ones that differ).
+- Text nodes are updated in place.
+- Children are added or removed as needed.
+- The focused input is left alone so the user's cursor position and selection are preserved.
+
+This is what makes `data-on-input` viable for live-as-you-type updates. Each keystroke triggers a server round-trip, the server re-renders, and the morph applies the diff without disrupting the user.
+
+## Lattice: Reactive Engine
+
+Fluxion's reactive layer is called Lattice (package `fluxion.cells`, aliased as `fluxion.lattice`). Three building blocks.
+
+### Cells
+
+Hold a value and notify watchers when it changes.
 
 ```lisp
 (let ((count (fluxion.cells:make-cell 0 :name "count")))
   (fluxion.cells:watch count
     (lambda (new old)
-      (format t "count changed: ~A -> ~A~%" old new)))
+      (format t "changed: ~A -> ~A~%" old new)))
   (setf (fluxion.cells:cell-value count) 1))
-;; => count changed: 0 -> 1
+;; prints: changed: 0 -> 1
 ```
 
-**Computed cells** derive their value from other cells. Dependencies are tracked automatically - you just read cells inside the thunk and Lattice figures out the graph.
+### Computed Cells
+
+Derive their value from other cells. Dependencies are tracked automatically. Just read cells inside the thunk and Lattice figures out the graph.
 
 ```lisp
 (let* ((count (fluxion.cells:make-cell 5))
@@ -173,12 +232,13 @@ Fluxion's reactive layer is called Lattice. It has three building blocks.
 ;; Changing count automatically recomputes label.
 ```
 
-**Propagators** connect input cells to output cells through a function. They support bidirectional networks - CL's exact rational arithmetic means values converge perfectly with no floating-point oscillation.
+### Propagators
+
+Connect input cells to output cells through a function. They support bidirectional networks. CL's exact rational arithmetic means values converge perfectly with no floating-point drift.
 
 ```lisp
 (let ((celsius    (fluxion.cells:make-cell 0))
       (fahrenheit (fluxion.cells:make-cell 32)))
-  ;; Two propagators form a bidirectional constraint
   (fluxion.cells:make-propagator
    :inputs (list celsius)
    :fn (lambda (c) (+ (* c 9/5) 32))
@@ -187,33 +247,85 @@ Fluxion's reactive layer is called Lattice. It has three building blocks.
    :inputs (list fahrenheit)
    :fn (lambda (f) (* (- f 32) 5/9))
    :outputs (list celsius))
-  ;; Set either side and the other updates
   (setf (fluxion.cells:cell-value celsius) 100)
   (fluxion.cells:cell-value fahrenheit))
 ;; => 212
 ```
 
-To connect a cell to a component so that changes trigger automatic DOM patches:
+### Connecting cells to components
 
 ```lisp
 (fluxion.cells:connect my-cell my-component)
 ```
 
-The counter example uses cells and a computed cell. The temperature converter example uses bidirectional propagators. Both are in the `examples/` directory.
+When the cell's value changes, the connected component is automatically re-rendered and patched. With `defcomponent`, cell slots are connected for you.
+
+## SSE Protocol
+
+Events are sent as standard SSE with JSON payloads:
+
+```text
+event: fluxion-patch
+data: {"selector":"#my-widget","mode":"morph","fragment":"<div id='my-widget'>...</div>"}
+
+event: fluxion-remove
+data: {"selector":"#old-element"}
+
+event: fluxion-append
+data: {"selector":"#list","fragment":"<li>New entry</li>"}
+
+event: fluxion-prepend
+data: {"selector":"#list","fragment":"<li>First entry</li>"}
+
+event: fluxion-signals
+data: {"signals":{"count":42,"status":"ready"}}
+
+event: fluxion-script
+data: {"script":"fluxionShowError('Something went wrong')"}
+
+event: fluxion-redirect
+data: {"url":"/other-page"}
+```
+
+Action responses (POST to `/action/...`) return these events in the response body. Server-push events come over the persistent `/sse` connection.
+
+## Supported `data-*` Attributes
+
+| Attribute | Description |
+| --- | --- |
+| `data-on-click="/path"` | POST to path on click |
+| `data-on-submit="/path"` | POST form data on submit |
+| `data-on-change="/path"` | POST on blur/change (input, select, checkbox). Sends `value` or `checked` |
+| `data-on-input="/path"` | POST on every keystroke. Sends `value`. Works well with DOM morphing |
+| `data-on-keydown="/path"` | POST on keydown. Sends `value`. Combine with `data-key` to filter |
+| `data-key="Enter"` | Only fire `data-on-keydown` for this key |
+| `data-param-foo="bar"` | Include `foo: "bar"` in the POST body. Works with any `data-on-*` |
+| `data-confirm="Sure?"` | Show a confirmation dialog before executing a click action |
+| `data-bind="signal-name"` | Two-way bind input value to a client-side signal |
+| `data-text="$signal-name"` | Display signal value as text content |
 
 ## Error Handling
 
-Server-side action errors are sent back as SSE script events that trigger an error toast in the browser. The toast auto-dismisses after 8 seconds or can be closed manually. You can also call `fluxionShowError("message")` from JavaScript or from a `fluxion-script` event.
+Server-side action errors are caught and sent back as `fluxion-script` events that display an error toast in the browser. The toast auto-dismisses after 8 seconds. You can trigger one manually from server code:
+
+```lisp
+(fluxion.server:push-event session
+  (fluxion.events:make-script-event "fluxionShowError('Something broke')"))
+```
 
 ## Dirty Tracking
 
-Components have a `dirty-p` flag and a `last-html` cache. The `defaction` macro marks a component dirty before the body runs. `patch-component` compares the new render against the cache and skips sending if nothing changed. You can force a patch with `:force t`.
+Components track whether they need re-rendering. `defaction` marks the component dirty before the body runs. `patch-component` compares new HTML against the cached version and skips the event if nothing changed.
 
 ```lisp
-(fluxion.components:patch-component my-component)           ; skips if clean
+(fluxion.components:patch-component my-component)           ; skips if unchanged
 (fluxion.components:patch-component my-component :force t)   ; always sends
-(fluxion.components:mark-dirty my-component)                 ; manual dirty
+(fluxion.components:mark-dirty my-component)                 ; manual dirty flag
 ```
+
+## API Reference
+
+See [API.md](API.md) for the complete API reference covering all exported symbols.
 
 ## Dependencies
 
@@ -222,7 +334,7 @@ Components have a `dirty-p` flag and a `last-html` cache. The `defaction` macro 
 - [Clack](https://github.com/fukamachi/clack) / [Hunchentoot](https://edicl.github.io/hunchentoot/) - web server
 - [cl-json](https://cl-json.common-lisp.dev/) - JSON encoding/decoding
 - [Parenscript](https://common-lisp.net/project/parenscript/) - Lisp-to-JavaScript compiler
-- [Babel](https://github.com/cl-babel/babel) - charset encoding/decoding
+- [Babel](https://github.com/cl-babel/babel) - charset encoding
 - [Bordeaux Threads](https://sionescu.github.io/bordeaux-threads/) - threading
 
 ## Roadmap
@@ -231,7 +343,8 @@ Components have a `dirty-p` flag and a `last-html` cache. The `defaction` macro 
 - **v0.2** - dirty tracking, sessions, defaction, data-* attributes
 - **v0.3** - reactive cells with watchers
 - **v0.4** - computed cells with automatic dependency tracking
-- **v0.5** - Lattice: propagator-inspired reactive dependency graph (current)
+- **v0.5** - Lattice: propagator-inspired reactive engine
+- **v0.6** - DOM morphing, defcomponent, persistent SSE server-push (current)
 
 ## Licence
 
