@@ -159,11 +159,14 @@ Parses the SSE response and dispatches events."
         (chain xhr (set-request-header "Accept" "text/event-stream"))
         (setf (@ xhr onreadystatechange)
               (lambda ()
-                (when (and (= (@ xhr ready-state) 4)
-                           (= (@ xhr status) 200))
-                  (fluxion-parse-sse-response (@ xhr response-text))
-                  (when callback
-                    (funcall callback)))))
+                (when (= (@ xhr ready-state) 4)
+                  (if (= (@ xhr status) 200)
+                      (progn
+                        (fluxion-parse-sse-response (@ xhr response-text))
+                        (when callback
+                          (funcall callback)))
+                      (fluxion-show-error
+                       (+ "Request failed (" (@ xhr status) "): " url))))))
         (chain xhr (send (if body
                              (chain -j-s-o-n (stringify body))
                              "")))))
@@ -352,6 +355,41 @@ ROOT defaults to document."
                                   (value (fluxion-get-signal signal-name)))
                              (when (not (= value undefined))
                                (setf (@ el text-content) value))))))))
+
+    ;;; ---------------------------------------------------
+    ;;; Error toast
+    ;;; ---------------------------------------------------
+
+    (defun fluxion-show-error (message)
+      "Show an error toast notification. Auto-dismisses after 8 seconds."
+      (chain console (warn "Fluxion error:" message))
+      (let ((existing (fluxion-qs "#fluxion-error-toast")))
+        (when existing
+          (chain existing (remove))))
+      (let ((toast (chain document (create-element "div"))))
+        (setf (@ toast id) "fluxion-error-toast")
+        (setf (@ toast inner-h-t-m-l)
+              (+ "<span>" message "</span>"
+                 "<button onclick=\"fluxionDismissError()\">&times;</button>"))
+        (setf (@ toast style css-text)
+              (+ "position:fixed;bottom:1rem;right:1rem;max-width:28rem;"
+                 "background:#d9534f;color:#fff;padding:0.75rem 1rem;"
+                 "border-radius:6px;font-size:0.9rem;z-index:9999;"
+                 "display:flex;align-items:center;gap:0.75rem;"
+                 "box-shadow:0 4px 12px rgba(0,0,0,0.2);animation:fluxionFadeIn 0.2s"))
+        (let ((btn (chain toast (query-selector "button"))))
+          (setf (@ btn style css-text)
+                "background:none;border:none;color:#fff;font-size:1.2rem;cursor:pointer;padding:0;line-height:1"))
+        (chain document body (append-child toast))
+        (set-timeout (lambda ()
+                       (fluxion-dismiss-error))
+                     8000)))
+
+    (defun fluxion-dismiss-error ()
+      "Dismiss the error toast if present."
+      (let ((toast (fluxion-qs "#fluxion-error-toast")))
+        (when toast
+          (chain toast (remove)))))
 
     ;;; ---------------------------------------------------
     ;;; Initialization
