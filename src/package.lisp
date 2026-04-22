@@ -132,6 +132,12 @@
    #:has-role-p
    #:require-auth
    #:require-role
+   #:router
+   #:make-router
+   #:add-route
+   #:defroute
+   #:dispatch-route
+   #:router-handler
    #:app-handler
    #:app-session-lock
    #:app-sessions
@@ -175,6 +181,12 @@
    #:has-role-p
    #:require-auth
    #:require-role
+   #:router
+   #:make-router
+   #:add-route
+   #:defroute
+   #:dispatch-route
+   #:router-handler
    #:push-event
    #:push-events
    #:push-component-patch

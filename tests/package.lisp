@@ -39,6 +39,10 @@
   :description "Server, sessions, event queue, SSE push."
   :in fluxion-suite)
 
+(def-suite router-suite
+  :description "Path-based routing."
+  :in fluxion-suite)
+
 (defun run-all-tests ()
   "Run the full Fluxion test suite. Returns T if all tests pass."
   (run! 'fluxion-suite))

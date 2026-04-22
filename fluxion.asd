@@ -46,7 +46,8 @@
      (:file "test-computed")
      (:file "test-propagators")
      (:file "test-components")
-     (:file "test-server")))))
+     (:file "test-server")
+     (:file "test-router")))))
 
 (defsystem "fluxion/client"
   :name "fluxion-client"

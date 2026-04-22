@@ -219,6 +219,51 @@ Both `authenticate` and `logout` regenerate the CSRF token to prevent session fi
 
 Clears the user and roles from the session and regenerates the CSRF token.
 
+## Routing
+
+For multi-page apps, use the built-in router instead of a single page-handler lambda. Routes support path parameters, per-route guards, and method filtering.
+
+```lisp
+(let ((r (fluxion.server:make-router)))
+
+  ;; Static path
+  (fluxion.server:add-route r :get "/"
+    (lambda (app session env &key params)
+      (declare (ignore app env params))
+      (list 200 '(:content-type "text/html")
+            (list (render-home session)))))
+
+  ;; Path parameters
+  (fluxion.server:add-route r :get "/users/:id"
+    (lambda (app session env &key params)
+      (declare (ignore app env))
+      (let ((user-id (cdr (assoc :id params))))
+        (list 200 '(:content-type "text/html")
+              (list (render-user session user-id))))))
+
+  ;; Protected route with auth guard
+  (fluxion.server:add-route r :get "/admin"
+    (lambda (app session env &key params)
+      (declare (ignore app env params))
+      (list 200 '(:content-type "text/html")
+            (list (render-admin session))))
+    :guard (lambda (session)
+             (fluxion.server:require-role session :admin)))
+
+  ;; Pass the router to start
+  (fluxion.server:start app (fluxion.server:router-handler r)))
+```
+
+The `defroute` macro is a shorthand for `add-route` with an inline lambda:
+
+```lisp
+(fluxion.server:defroute r :get "/about" (app session env &key params)
+  (declare (ignore app env params))
+  (list 200 '(:content-type "text/html") (list "<h1>About</h1>")))
+```
+
+Path parameters use `:name` syntax in the pattern. The extracted values are strings in the params alist with keyword keys. Routes are matched in registration order and the first match wins.
+
 ## Server Push (Persistent SSE)
 
 Every browser automatically opens an EventSource connection to `/sse`. The server holds it open and can push updates at any time. No user interaction needed.

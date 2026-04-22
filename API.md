@@ -198,6 +198,32 @@ Every session gets a unique CSRF token on creation. The server rejects any POST 
 
 **`require-role (session role &key login-url forbidden-url)`** - role guard for page handlers. Returns NIL if the user has the role. Redirects to `login-url` if not authenticated. Returns 403 if authenticated but lacking the role, or redirects to `forbidden-url` if provided.
 
+### Router
+
+**`router`** - class representing a path-based request router.
+
+**`make-router (&key not-found-handler)`** - create a new router. `not-found-handler` is an optional function `(app session env)` called when no route matches. If omitted, unmatched requests get a plain 404.
+
+**`add-route (router method pattern handler &key guard name)`** - register a route.
+
+- `method` - `:get`, `:post`, or `:any`.
+- `pattern` - URL path pattern. Literal segments are matched exactly. Segments starting with `:` are parameters (e.g. `"/users/:id"`). Extracted values are strings.
+- `handler` - function `(app session env &key params)` returning a Clack response. `params` is an alist of extracted path parameters with keyword keys.
+- `:guard` - optional function `(session)`. If it returns a non-NIL response, that response is sent and the handler is skipped. Pairs well with `require-auth` and `require-role`.
+- `:name` - optional route name (for future URL generation).
+
+**`defroute (router-var method pattern args &body body)`** - macro shorthand for `add-route` with an inline lambda.
+
+```lisp
+(defroute r :get "/users/:id" (app session env &key params)
+  (let ((id (cdr (assoc :id params))))
+    ...))
+```
+
+**`dispatch-route (router app session env)`** - find the first matching route and dispatch it. Returns a Clack response. Called internally by `router-handler`.
+
+**`router-handler (router)`** - return a page-handler function suitable for passing to `start`. Bridges the router into the existing server.
+
 ### Server Push
 
 These functions push events to a session's persistent SSE connection (the `/sse` endpoint).
