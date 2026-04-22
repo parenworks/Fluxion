@@ -1,0 +1,13 @@
+# Compiled JS output (generated from Parenscript)
+static/fluxion.js
+
+# SBCL / implementation artifacts
+*.fasl
+*.lx64fsl
+*.dx64fsl
+*.wx64fsl
+
+# Editor backups
+*~
+\#*\#
+.\#*
