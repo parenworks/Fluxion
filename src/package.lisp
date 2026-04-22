@@ -121,7 +121,13 @@
    #:session
    #:session-id
    #:session-component
-   #:session-components))
+   #:session-components
+   #:app-handler
+   #:app-session-lock
+   #:app-sessions
+   #:push-event
+   #:push-events
+   #:push-component-patch))
 
 (defpackage #:fluxion
   (:use #:cl)
@@ -150,6 +156,9 @@
    #:with-event-stream
    #:session
    #:session-component
+   #:push-event
+   #:push-events
+   #:push-component-patch
    ;; Components
    #:defcomponent
    ;; Events

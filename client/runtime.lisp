@@ -27,6 +27,7 @@
     (defvar *fluxion-signals* (create))
     (defvar *fluxion-event-source* nil)
     (defvar *fluxion-initialized* false)
+    (defvar *fluxion-sse-reconnect-timer* nil)
 
     ;;; ---------------------------------------------------
     ;;; DOM helpers
@@ -484,6 +485,52 @@ ROOT defaults to document."
           (chain toast (remove)))))
 
     ;;; ---------------------------------------------------
+    ;;; Persistent SSE connection
+    ;;; ---------------------------------------------------
+
+    (defun fluxion-connect-sse ()
+      "Open a persistent EventSource connection to /sse for server-push."
+      (when *fluxion-event-source*
+        (chain *fluxion-event-source* (close))
+        (setf *fluxion-event-source* nil))
+      (when *fluxion-sse-reconnect-timer*
+        (clear-timeout *fluxion-sse-reconnect-timer*)
+        (setf *fluxion-sse-reconnect-timer* nil))
+      (let ((source (new (-event-source "/sse"))))
+        (setf *fluxion-event-source* source)
+        ;; Register handlers for each Fluxion event type
+        (chain source (add-event-listener "fluxion-patch"
+                        (lambda (e)
+                          (fluxion-handle-patch (chain -j-s-o-n (parse (@ e data)))))))
+        (chain source (add-event-listener "fluxion-remove"
+                        (lambda (e)
+                          (fluxion-handle-remove (chain -j-s-o-n (parse (@ e data)))))))
+        (chain source (add-event-listener "fluxion-append"
+                        (lambda (e)
+                          (fluxion-handle-append (chain -j-s-o-n (parse (@ e data)))))))
+        (chain source (add-event-listener "fluxion-prepend"
+                        (lambda (e)
+                          (fluxion-handle-prepend (chain -j-s-o-n (parse (@ e data)))))))
+        (chain source (add-event-listener "fluxion-signals"
+                        (lambda (e)
+                          (fluxion-handle-signals (chain -j-s-o-n (parse (@ e data)))))))
+        (chain source (add-event-listener "fluxion-script"
+                        (lambda (e)
+                          (fluxion-handle-script (chain -j-s-o-n (parse (@ e data)))))))
+        (chain source (add-event-listener "fluxion-redirect"
+                        (lambda (e)
+                          (fluxion-handle-redirect (chain -j-s-o-n (parse (@ e data)))))))
+        ;; Reconnect on error after a short delay
+        (setf (@ source onerror)
+              (lambda ()
+                (chain console (warn "Fluxion: SSE connection lost, reconnecting..."))
+                (chain source (close))
+                (setf *fluxion-event-source* nil)
+                (setf *fluxion-sse-reconnect-timer*
+                      (set-timeout fluxion-connect-sse 3000))))
+        (chain console (log "Fluxion: SSE connection opened"))))
+
+    ;;; ---------------------------------------------------
     ;;; Initialization
     ;;; ---------------------------------------------------
 
@@ -495,6 +542,7 @@ ROOT defaults to document."
       (chain console (log "Fluxion: initializing client runtime"))
       (fluxion-bind-actions)
       (fluxion-update-text-bindings)
+      (fluxion-connect-sse)
       (chain console (log "Fluxion: ready")))
 
     ;; Auto-initialize when DOM is ready

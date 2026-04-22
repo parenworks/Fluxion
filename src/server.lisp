@@ -18,8 +18,58 @@
                     :accessor session-created-at)
    (last-accessed-at :initform (get-universal-time)
                      :accessor session-last-accessed-at
-                     :documentation "Universal time of last request using this session."))
+                     :documentation "Universal time of last request using this session.")
+   (event-queue     :initform nil
+                    :accessor session-event-queue
+                    :documentation "Event queue for persistent SSE push. Created on first /sse connect."))
   (:documentation "A per-browser session holding its own component instances."))
+
+;;; -------------------------------------------------------
+;;; Event queue (for persistent SSE push)
+;;; -------------------------------------------------------
+
+(defclass event-queue ()
+  ((events  :initform nil
+            :accessor eq-events)
+   (lock    :initform (bt:make-lock "event-queue")
+            :accessor eq-lock)
+   (condvar :initform (bt:make-condition-variable :name "event-queue-cv")
+            :accessor eq-condvar)
+   (closed-p :initform nil
+             :accessor eq-closed-p))
+  (:documentation "Thread-safe event queue with blocking dequeue."))
+
+(defun make-event-queue ()
+  (make-instance 'event-queue))
+
+(defun enqueue-event (queue event)
+  "Add EVENT to QUEUE and wake any waiting reader."
+  (bt:with-lock-held ((eq-lock queue))
+    (setf (eq-events queue)
+          (nconc (eq-events queue) (list event)))
+    (bt:condition-notify (eq-condvar queue))))
+
+(defun dequeue-all-events (queue &key (timeout 15))
+  "Block until events are available or TIMEOUT seconds elapse.
+Returns the list of events (may be empty on timeout)."
+  (bt:with-lock-held ((eq-lock queue))
+    (when (and (null (eq-events queue))
+               (not (eq-closed-p queue)))
+      (bt:condition-wait (eq-condvar queue) (eq-lock queue)
+                         :timeout timeout))
+    (prog1 (eq-events queue)
+      (setf (eq-events queue) nil))))
+
+(defun close-event-queue (queue)
+  "Mark QUEUE as closed and wake any waiting reader."
+  (bt:with-lock-held ((eq-lock queue))
+    (setf (eq-closed-p queue) t)
+    (bt:condition-notify (eq-condvar queue))))
+
+(defun ensure-event-queue (session)
+  "Return the session's event queue, creating it if needed."
+  (or (session-event-queue session)
+      (setf (session-event-queue session) (make-event-queue))))
 
 (defun touch-session (session)
   "Update the last-accessed-at timestamp on SESSION."
@@ -163,6 +213,26 @@ of SSE events to send, or write directly to an event stream."))
         (selector (component-selector component)))
     (send-event stream
                 (make-patch-event selector html :mode mode))))
+
+(defun push-event (session event)
+  "Push an SSE event to a session's persistent SSE connection.
+The event will be delivered to the browser via the EventSource stream."
+  (let ((queue (session-event-queue session)))
+    (when queue
+      (enqueue-event queue event))))
+
+(defun push-events (session events)
+  "Push multiple SSE events to a session's persistent connection."
+  (let ((queue (session-event-queue session)))
+    (when queue
+      (dolist (e events)
+        (enqueue-event queue e)))))
+
+(defun push-component-patch (session component &key (mode "morph"))
+  "Re-render COMPONENT and push a patch event to SESSION's SSE stream."
+  (mark-dirty component)
+  (let ((events (patch-component component :mode mode :force t)))
+    (push-events session events)))
 
 ;;; -------------------------------------------------------
 ;;; Request parsing
@@ -351,6 +421,32 @@ HTML page response."
              (get-or-create-session app env)
            (let ((response
                    (cond
+                     ;; Persistent SSE stream (GET /sse)
+                     ((and (eq method :get)
+                           (string= path "/sse"))
+                      (let ((queue (ensure-event-queue session)))
+                        ;; Return a streaming callback for Clack
+                        ;; The responder (handle-normal-response) returns a writer
+                        ;; function when called without a body.
+                        (lambda (responder)
+                          (let ((writer (funcall responder
+                                          '(200 (:content-type "text/event-stream"
+                                                 :cache-control "no-cache"
+                                                 :x-accel-buffering "no")))))
+                            (handler-case
+                                (loop until (eq-closed-p queue) do
+                                  (let ((events (dequeue-all-events queue :timeout 15)))
+                                    (if events
+                                        (dolist (event events)
+                                          (funcall writer (format-sse-event event)))
+                                        ;; Keep-alive comment
+                                        (funcall writer
+                                                 (format nil ": keepalive~%~%")))))
+                              (error ()
+                                ;; Client disconnected
+                                nil))
+                            (ignore-errors (funcall writer nil :close t))))))
+
                      ;; CLOS component actions (POST /action/component-id/action-name)
                      ((and (eq method :post)
                            (alexandria:starts-with-subseq "/action/" path))
@@ -385,8 +481,8 @@ HTML page response."
                      ;; Default: serve the page
                      (t
                       (funcall page-handler app session env)))))
-             ;; Set session cookie on new sessions
-             (if new-session-p
+             ;; Set session cookie on new sessions (skip for streaming responses)
+             (if (and new-session-p (listp response))
                  (set-session-cookie response session)
                  response))))))))
 
