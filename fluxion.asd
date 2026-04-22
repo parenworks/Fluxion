@@ -51,4 +51,5 @@
   ((:module "examples"
     :serial t
     :components
-    ((:file "counter")))))
+    ((:file "counter")
+     (:file "todo")))))
