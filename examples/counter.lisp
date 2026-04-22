@@ -2,9 +2,8 @@
 ;;;; Fluxion Example - Counter
 ;;;;
 ;;;; The "hello world" of Fluxion.  Demonstrates:
-;;;;   - Defining a CLOS component
-;;;;   - Rendering with Spinneret
-;;;;   - Reactive cells (auto-patching on state change)
+;;;;   - defcomponent macro (one-form component definition)
+;;;;   - Cell-backed slots with auto-patching
 ;;;;   - Computed cells (auto-derived values)
 ;;;;   - Handling actions via defaction
 ;;;;
@@ -21,55 +20,29 @@
 (in-package #:fluxion.examples.counter)
 
 ;;; -------------------------------------------------------
-;;; Component
+;;; Component (defined with defcomponent macro)
 ;;; -------------------------------------------------------
+;;; The :cell t option makes the count slot cell-backed.
+;;; defcomponent generates the class, the cell setup, the
+;;; accessor functions, and the render method in one form.
 
-(defclass counter (fluxion.components:component)
-  ((count :accessor counter-count-cell
-          :documentation "A reactive cell holding the count value.")
-   (label :accessor counter-label-cell
-          :documentation "A computed cell deriving a display label from count."))
-  (:default-initargs :id "counter"))
-
-(defmethod initialize-instance :after ((c counter) &key)
-  (setf (counter-count-cell c) (fluxion.cells:make-cell 0 :name "count"))
-  ;; Computed cell: derives a label from the count, auto-tracks dependency
-  (setf (counter-label-cell c)
-        (fluxion.cells:make-computed
-         (let ((cell (counter-count-cell c)))
-           (lambda ()
-             (let ((n (fluxion.cells:cell-value cell)))
-               (format nil "Count: ~D~A" n
-                       (cond ((zerop n) " (zero)")
-                             ((plusp n) " (positive)")
-                             (t         " (negative)"))))))
-         :name "label"))
-  ;; Connect the computed label to the component - changes auto-patch
-  (fluxion.cells:connect (counter-label-cell c) c))
-
-(defun counter-count (counter)
-  "Read the counter's current count."
-  (fluxion.cells:cell-value (counter-count-cell counter)))
-
-(defun (setf counter-count) (value counter)
-  "Set the counter's count. Triggers auto-patch via the cell."
-  (setf (fluxion.cells:cell-value (counter-count-cell counter)) value))
-
-(defun counter-label (counter)
-  "Read the derived label (computed from count)."
-  (fluxion.cells:cell-value (counter-label-cell counter)))
-
-(defmethod fluxion.components:render ((c counter))
-  (spinneret:with-html-string
-    (:div :id (fluxion.components:component-id c)
-          :class "counter-component"
-      (:h2 "Counter")
-      (:p :class "count-display"
-          (counter-label c))
-      (:div :class "counter-buttons"
-        (:button :data-on-click "/action/counter/increment" "Increment")
-        (:button :data-on-click "/action/counter/decrement" "Decrement")
-        (:button :data-on-click "/action/counter/reset"     "Reset")))))
+(fluxion.components:defcomponent counter
+  :id "counter"
+  :slots ((count :cell t :initform 0 :accessor counter-count))
+  :render (let ((n (counter-count self)))
+            (spinneret:with-html-string
+              (:div :id (fluxion.components:component-id self)
+                    :class "counter-component"
+                (:h2 "Counter")
+                (:p :class "count-display"
+                    (format nil "Count: ~D~A" n
+                            (cond ((zerop n) " (zero)")
+                                  ((plusp n) " (positive)")
+                                  (t         " (negative)"))))
+                (:div :class "counter-buttons"
+                  (:button :data-on-click "/action/counter/increment" "Increment")
+                  (:button :data-on-click "/action/counter/decrement" "Decrement")
+                  (:button :data-on-click "/action/counter/reset"     "Reset"))))))
 
 ;;; -------------------------------------------------------
 ;;; Actions (via defaction - CLOS dispatch)

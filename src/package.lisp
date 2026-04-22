@@ -52,6 +52,7 @@
    #:render
    #:handle-action
    #:defaction
+   #:defcomponent
    #:patch-component
    #:component-selector
    #:component-dirty-p
@@ -149,6 +150,8 @@
    #:with-event-stream
    #:session
    #:session-component
+   ;; Components
+   #:defcomponent
    ;; Events
    #:make-patch-event
    #:make-remove-event
