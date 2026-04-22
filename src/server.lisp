@@ -8,15 +8,27 @@
 ;;; -------------------------------------------------------
 
 (defclass session ()
-  ((id         :initarg :id
-               :accessor session-id
-               :type string)
-   (components :initform (make-hash-table :test 'equal)
-               :accessor session-components
-               :documentation "Component instances for this session, keyed by component-id.")
-   (created-at :initform (get-universal-time)
-               :accessor session-created-at))
+  ((id              :initarg :id
+                    :accessor session-id
+                    :type string)
+   (components      :initform (make-hash-table :test 'equal)
+                    :accessor session-components
+                    :documentation "Component instances for this session, keyed by component-id.")
+   (created-at      :initform (get-universal-time)
+                    :accessor session-created-at)
+   (last-accessed-at :initform (get-universal-time)
+                     :accessor session-last-accessed-at
+                     :documentation "Universal time of last request using this session."))
   (:documentation "A per-browser session holding its own component instances."))
+
+(defun touch-session (session)
+  "Update the last-accessed-at timestamp on SESSION."
+  (setf (session-last-accessed-at session) (get-universal-time))
+  session)
+
+(defun session-expired-p (session ttl)
+  "Return T if SESSION has not been accessed within TTL seconds."
+  (> (- (get-universal-time) (session-last-accessed-at session)) ttl))
 
 (defun generate-session-id ()
   "Generate a random session ID string."
@@ -55,6 +67,17 @@
                :documentation "Session store, keyed by session-id string.")
    (session-lock :initform (bt:make-lock "fluxion-session-lock")
                  :accessor app-session-lock)
+   (session-ttl :initarg :session-ttl
+                :accessor app-session-ttl
+                :initform 3600
+                :documentation "Session time-to-live in seconds. Default 1 hour.")
+   (reaper-thread :initform nil
+                  :accessor app-reaper-thread
+                  :documentation "Background thread that periodically removes expired sessions.")
+   (reaper-interval :initarg :reaper-interval
+                    :accessor app-reaper-interval
+                    :initform 60
+                    :documentation "Seconds between session reaper runs. Default 60.")
    (static-dir :initarg :static-dir
                :accessor app-static-dir
                :initform nil
@@ -67,9 +90,11 @@
                :initform 5000))
   (:documentation "Top-level Fluxion application."))
 
-(defun make-fluxion-app (&key (port 5000) static-dir)
+(defun make-fluxion-app (&key (port 5000) static-dir (session-ttl 3600) (reaper-interval 60))
   "Create a new Fluxion application instance."
-  (make-instance 'fluxion-app :port port :static-dir static-dir))
+  (make-instance 'fluxion-app :port port :static-dir static-dir
+                              :session-ttl session-ttl
+                              :reaper-interval reaper-interval))
 
 ;;; -------------------------------------------------------
 ;;; Component registry
@@ -270,7 +295,9 @@ Ensures per-session component instances are created from factories."
     (bt:with-lock-held ((app-session-lock app))
       (let ((existing (and sid (gethash sid (app-sessions app)))))
         (if existing
-            (values existing nil)
+            (progn
+              (touch-session existing)
+              (values existing nil))
             (let* ((new-sid (generate-session-id))
                    (session (make-instance 'session :id new-sid)))
               ;; Create per-session component instances from factories
@@ -361,13 +388,56 @@ HTML page response."
           (clack:clackup clack-app
                          :port (app-port app)
                          :server :hunchentoot))
+    (start-session-reaper app)
     app))
 
 (defgeneric stop (app)
   (:documentation "Stop the Fluxion application server."))
 
 (defmethod stop ((app fluxion-app))
+  (stop-session-reaper app)
   (when (app-handler app)
     (clack:stop (app-handler app))
     (setf (app-handler app) nil))
   app)
+
+;;; -------------------------------------------------------
+;;; Session reaper
+;;; -------------------------------------------------------
+
+(defun reap-sessions (app)
+  "Remove expired sessions from APP. Returns the number of sessions reaped."
+  (let ((ttl (app-session-ttl app))
+        (reaped 0))
+    (bt:with-lock-held ((app-session-lock app))
+      (let ((to-remove nil))
+        (maphash (lambda (sid session)
+                   (when (session-expired-p session ttl)
+                     (push sid to-remove)))
+                 (app-sessions app))
+        (dolist (sid to-remove)
+          (remhash sid (app-sessions app))
+          (incf reaped))))
+    reaped))
+
+(defun start-session-reaper (app)
+  "Start the background session reaper thread for APP."
+  (stop-session-reaper app)
+  (setf (app-reaper-thread app)
+        (bt:make-thread
+         (lambda ()
+           (loop
+             (sleep (app-reaper-interval app))
+             (unless (app-handler app)
+               (return))
+             (let ((n (reap-sessions app)))
+               (when (plusp n)
+                 (format t "[fluxion] Reaped ~D expired session~:P~%" n)))))
+         :name "fluxion-session-reaper")))
+
+(defun stop-session-reaper (app)
+  "Stop the background session reaper thread for APP."
+  (when (and (app-reaper-thread app)
+             (bt:thread-alive-p (app-reaper-thread app)))
+    (bt:destroy-thread (app-reaper-thread app)))
+  (setf (app-reaper-thread app) nil))
