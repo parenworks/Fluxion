@@ -35,9 +35,25 @@
       (:p :class "count-display"
           (format nil "Count: ~D" (counter-count c)))
       (:div :class "counter-buttons"
-        (:button :data-on-click "/counter/increment" "Increment")
-        (:button :data-on-click "/counter/decrement" "Decrement")
-        (:button :data-on-click "/counter/reset"     "Reset")))))
+        (:button :data-on-click "/action/counter/increment" "Increment")
+        (:button :data-on-click "/action/counter/decrement" "Decrement")
+        (:button :data-on-click "/action/counter/reset"     "Reset")))))
+
+;;; -------------------------------------------------------
+;;; Actions (via defaction - CLOS dispatch)
+;;; -------------------------------------------------------
+
+(fluxion.components:defaction counter :increment (c)
+  (incf (counter-count c))
+  nil)
+
+(fluxion.components:defaction counter :decrement (c)
+  (decf (counter-count c))
+  nil)
+
+(fluxion.components:defaction counter :reset (c)
+  (setf (counter-count c) 0)
+  nil)
 
 ;;; -------------------------------------------------------
 ;;; Page
@@ -67,55 +83,30 @@
 ;;; -------------------------------------------------------
 
 (defvar *app* nil)
-(defvar *counter* nil)
 
 (defun start-counter (&key (port 5000))
   (when *app*
     (fluxion.server:stop *app*))
 
-  (setf *counter* (make-instance 'counter))
   (setf *app* (fluxion.server:make-fluxion-app
                :port port
                :static-dir (asdf:system-relative-pathname "fluxion" "static/")))
 
-  ;; Register the component
-  (fluxion.server:register-component *app* *counter*)
-
-  ;; Register actions
-  (fluxion.server:register-action *app* "/counter/increment"
-    (lambda (app params)
-      (declare (ignore app params))
-      (incf (counter-count *counter*))
-      (list (fluxion.events:make-patch-event
-             (fluxion.components:component-selector *counter*)
-             (fluxion.components:render *counter*)))))
-
-  (fluxion.server:register-action *app* "/counter/decrement"
-    (lambda (app params)
-      (declare (ignore app params))
-      (decf (counter-count *counter*))
-      (list (fluxion.events:make-patch-event
-             (fluxion.components:component-selector *counter*)
-             (fluxion.components:render *counter*)))))
-
-  (fluxion.server:register-action *app* "/counter/reset"
-    (lambda (app params)
-      (declare (ignore app params))
-      (setf (counter-count *counter*) 0)
-      (list (fluxion.events:make-patch-event
-             (fluxion.components:component-selector *counter*)
-             (fluxion.components:render *counter*)))))
+  ;; Register a factory so each session gets its own counter instance
+  (fluxion.server:register-component-factory *app* "counter"
+    (lambda () (make-instance 'counter)))
 
   ;; Build the client runtime JS
   (fluxion.client:build-client)
 
-  ;; Start the server
+  ;; Start the server - page-handler now receives (app session env)
   (fluxion.server:start *app*
-    (lambda (app env)
+    (lambda (app session env)
       (declare (ignore app env))
-      (list 200
-            '(:content-type "text/html")
-            (list (render-counter-page *counter*))))
+      (let ((counter (fluxion.server:session-component session "counter")))
+        (list 200
+              '(:content-type "text/html")
+              (list (render-counter-page counter)))))
     :port port)
 
   (format t "~%Fluxion counter example running at http://localhost:~D~%" port)

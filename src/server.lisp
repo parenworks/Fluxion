@@ -4,16 +4,57 @@
 (in-package #:fluxion.server)
 
 ;;; -------------------------------------------------------
+;;; Session
+;;; -------------------------------------------------------
+
+(defclass session ()
+  ((id         :initarg :id
+               :accessor session-id
+               :type string)
+   (components :initform (make-hash-table :test 'equal)
+               :accessor session-components
+               :documentation "Component instances for this session, keyed by component-id.")
+   (created-at :initform (get-universal-time)
+               :accessor session-created-at))
+  (:documentation "A per-browser session holding its own component instances."))
+
+(defun generate-session-id ()
+  "Generate a random session ID string."
+  (format nil "~A-~A"
+          (get-universal-time)
+          (random (expt 2 64))))
+
+(defgeneric session-component (session id)
+  (:documentation "Find a component by ID within a SESSION."))
+
+(defmethod session-component ((session session) (id string))
+  (gethash id (session-components session)))
+
+(defgeneric (setf session-component) (component session id)
+  (:documentation "Store a component in a SESSION under ID."))
+
+(defmethod (setf session-component) ((c component) (session session) (id string))
+  (setf (gethash id (session-components session)) c))
+
+;;; -------------------------------------------------------
 ;;; Application container
 ;;; -------------------------------------------------------
 
 (defclass fluxion-app ()
   ((components :initform (make-hash-table :test 'equal)
                :accessor app-components
-               :documentation "Registry of live component instances, keyed by component-id.")
+               :documentation "Registry of global component instances, keyed by component-id.")
+   (component-factories :initform (make-hash-table :test 'equal)
+                        :accessor app-component-factories
+                        :documentation "Factory functions keyed by component-id. Called to create per-session instances.")
    (actions    :initform (make-hash-table :test 'equal)
                :accessor app-actions
                :documentation "Registry of action handlers, keyed by URL path string.")
+   (sessions   :initform (make-hash-table :test 'equal)
+               :accessor app-sessions
+               :documentation "Session store, keyed by session-id string.")
+   (session-lock :initform (bt:make-lock "fluxion-session-lock")
+                 :accessor app-session-lock)
    (static-dir :initarg :static-dir
                :accessor app-static-dir
                :initform nil
@@ -35,17 +76,27 @@
 ;;; -------------------------------------------------------
 
 (defgeneric register-component (app component)
-  (:documentation "Register a live COMPONENT instance in APP."))
+  (:documentation "Register a global (shared) COMPONENT instance in APP."))
 
 (defmethod register-component ((app fluxion-app) (c component))
   (setf (gethash (component-id c) (app-components app)) c)
   c)
 
-(defgeneric find-component (app id)
-  (:documentation "Find a registered component by its ID string."))
+(defgeneric register-component-factory (app id factory-fn)
+  (:documentation "Register a factory function for per-session component creation.
+ID is the component-id string. FACTORY-FN is a function of zero arguments
+that returns a fresh component instance."))
 
-(defmethod find-component ((app fluxion-app) (id string))
-  (gethash id (app-components app)))
+(defmethod register-component-factory ((app fluxion-app) (id string) factory-fn)
+  (setf (gethash id (app-component-factories app)) factory-fn)
+  id)
+
+(defgeneric find-component (app id &key session)
+  (:documentation "Find a component by ID. Checks session first, then global registry."))
+
+(defmethod find-component ((app fluxion-app) (id string) &key session)
+  (or (and session (session-component session id))
+      (gethash id (app-components app))))
 
 ;;; -------------------------------------------------------
 ;;; Action registry
@@ -151,44 +202,149 @@ Returns NIL if no body or parse failure."
       (t "application/octet-stream"))))
 
 ;;; -------------------------------------------------------
+;;; CLOS action dispatch
+;;; -------------------------------------------------------
+
+(defun parse-action-path (path)
+  "Parse a path like /action/component-id/action-name.
+Returns (values component-id action-keyword) or NIL."
+  (let ((parts (remove "" (uiop:split-string path :separator "/") :test #'string=)))
+    (when (and (= (length parts) 3)
+               (string-equal (first parts) "action"))
+      (values (second parts)
+              (intern (string-upcase (third parts)) :keyword)))))
+
+(defun dispatch-component-action (app path params &key session)
+  "Try to dispatch PATH as a CLOS component action.
+Returns a Clack response or NIL if the path is not an action route."
+  (multiple-value-bind (component-id action-keyword)
+      (parse-action-path path)
+    (when component-id
+      (let ((component (find-component app component-id :session session)))
+        (if component
+            (handler-case
+                (let ((events (handle-action component action-keyword params)))
+                  (if (listp events)
+                      (list 200
+                            (sse-headers)
+                            (list (with-output-to-string (s)
+                                    (send-events s events))))
+                      events))
+              (error (e)
+                (list 500
+                      '(:content-type "text/plain")
+                      (list (format nil "Action error: ~A" e)))))
+            (list 404
+                  '(:content-type "text/plain")
+                  '("Component not found")))))))
+
+;;; -------------------------------------------------------
+;;; Session management
+;;; -------------------------------------------------------
+
+(alexandria:define-constant +session-cookie-name+ "fluxion-sid" :test #'equal)
+
+(defun parse-cookies (env)
+  "Parse the Cookie header from Clack ENV into an alist.
+Handles both Lack's :headers hash-table and raw :http-cookie plist key."
+  (let* ((headers (getf env :headers))
+         (cookie-header (or (and headers (gethash "cookie" headers))
+                            (getf env :http-cookie))))
+    (when cookie-header
+      (loop for pair in (uiop:split-string cookie-header :separator ";")
+            for trimmed = (string-trim " " pair)
+            for eqpos = (position #\= trimmed)
+            when eqpos
+              collect (cons (subseq trimmed 0 eqpos)
+                            (subseq trimmed (1+ eqpos)))))))
+
+(defun get-session-id-from-env (env)
+  "Extract the Fluxion session ID from cookies, or NIL."
+  (let ((cookies (parse-cookies env)))
+    (cdr (assoc +session-cookie-name+ cookies :test #'string=))))
+
+(defun get-or-create-session (app env)
+  "Return (values session is-new-p). Creates a new session if needed.
+Ensures per-session component instances are created from factories."
+  (let ((sid (get-session-id-from-env env)))
+    (bt:with-lock-held ((app-session-lock app))
+      (let ((existing (and sid (gethash sid (app-sessions app)))))
+        (if existing
+            (values existing nil)
+            (let* ((new-sid (generate-session-id))
+                   (session (make-instance 'session :id new-sid)))
+              ;; Create per-session component instances from factories
+              (maphash (lambda (id factory-fn)
+                         (let ((c (funcall factory-fn)))
+                           (setf (gethash id (session-components session)) c)))
+                       (app-component-factories app))
+              (setf (gethash new-sid (app-sessions app)) session)
+              (values session t)))))))
+
+(defun set-session-cookie (response session)
+  "Add a Set-Cookie header to RESPONSE for SESSION."
+  (let ((cookie (format nil "~A=~A; Path=/; HttpOnly; SameSite=Lax"
+                        +session-cookie-name+ (session-id session))))
+    (list (first response)
+          (append (second response) (list :set-cookie cookie))
+          (third response))))
+
+;;; -------------------------------------------------------
 ;;; Main Clack application handler
 ;;; -------------------------------------------------------
 
 (defun make-clack-app (app page-handler)
   "Build a Clack application function for APP.
-PAGE-HANDLER is a function of (app env) that returns the initial
+PAGE-HANDLER is a function of (app session env) that returns the initial
 HTML page response."
   (lambda (env)
     (let ((path (get-request-path env))
           (method (get-request-method env)))
       (cond
-        ;; Static files
+        ;; Static files (no session needed)
         ((alexandria:starts-with-subseq "/static/" path)
          (static-file-handler app env))
 
-        ;; SSE action endpoints (POST - returns event-stream)
-        ((and (eq method :post)
-              (gethash path (app-actions app)))
-         (let ((action-fn (gethash path (app-actions app)))
-               (params (parse-request-body env)))
-           (handler-case
-               (let ((events (funcall action-fn app params)))
-                 (if (listp events)
-                     ;; Action returned a list of events; format as SSE
-                     (list 200
-                           (sse-headers)
-                           (list (with-output-to-string (s)
-                                   (send-events s events))))
-                     ;; Action returned something else (e.g. a direct response)
-                     events))
-             (error (e)
-               (list 500
-                     '(:content-type "text/plain")
-                     (list (format nil "Action error: ~A" e)))))))
-
-        ;; Default: serve the page
+        ;; Everything else needs a session
         (t
-         (funcall page-handler app env))))))
+         (multiple-value-bind (session new-session-p)
+             (get-or-create-session app env)
+           (let ((response
+                   (cond
+                     ;; CLOS component actions (POST /action/component-id/action-name)
+                     ((and (eq method :post)
+                           (alexandria:starts-with-subseq "/action/" path))
+                      (let ((params (parse-request-body env)))
+                        (or (dispatch-component-action app path params :session session)
+                            (list 404
+                                  '(:content-type "text/plain")
+                                  '("Action not found")))))
+
+                     ;; Legacy registered action endpoints
+                     ((and (eq method :post)
+                           (gethash path (app-actions app)))
+                      (let ((action-fn (gethash path (app-actions app)))
+                            (params (parse-request-body env)))
+                        (handler-case
+                            (let ((events (funcall action-fn app params)))
+                              (if (listp events)
+                                  (list 200
+                                        (sse-headers)
+                                        (list (with-output-to-string (s)
+                                                (send-events s events))))
+                                  events))
+                          (error (e)
+                            (list 500
+                                  '(:content-type "text/plain")
+                                  (list (format nil "Action error: ~A" e)))))))
+
+                     ;; Default: serve the page
+                     (t
+                      (funcall page-handler app session env)))))
+             ;; Set session cookie on new sessions
+             (if new-session-p
+                 (set-session-cookie response session)
+                 response))))))))
 
 ;;; -------------------------------------------------------
 ;;; Start / Stop

@@ -51,7 +51,13 @@
    #:component-signals
    #:render
    #:handle-action
-   #:component-selector))
+   #:defaction
+   #:patch-component
+   #:component-selector
+   #:component-dirty-p
+   #:component-last-html
+   #:mark-dirty
+   #:clear-dirty))
 
 (defpackage #:fluxion.render
   (:use #:cl #:fluxion.components)
@@ -71,13 +77,18 @@
    #:fluxion-app
    #:make-fluxion-app
    #:register-component
+   #:register-component-factory
    #:find-component
    #:register-action
    #:start
    #:stop
    #:with-event-stream
    #:patch
-   #:send-event))
+   #:send-event
+   #:session
+   #:session-id
+   #:session-component
+   #:session-components))
 
 (defpackage #:fluxion
   (:use #:cl)
@@ -89,16 +100,23 @@
    #:component-id
    #:render
    #:handle-action
+   #:defaction
+   #:patch-component
+   #:mark-dirty
+   #:clear-dirty
    ;; Server
    #:fluxion-app
    #:make-fluxion-app
    #:register-component
+   #:register-component-factory
    #:register-action
    #:start
    #:stop
    #:patch
    #:send-event
    #:with-event-stream
+   #:session
+   #:session-component
    ;; Events
    #:make-patch-event
    #:make-remove-event
