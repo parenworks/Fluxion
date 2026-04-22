@@ -473,6 +473,10 @@ Components track whether they need re-rendering. `defaction` marks the component
 
 See [API.md](API.md) for the complete API reference covering all exported symbols.
 
+## Deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment with Caddy, nginx, systemd, and SSE configuration.
+
 ## Dependencies
 
 - [Spinneret](https://github.com/ruricolist/spinneret) - HTML generation
