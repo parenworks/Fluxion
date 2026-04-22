@@ -15,6 +15,7 @@
                "babel"
                "bordeaux-threads"
                "hunchentoot"
+               "clack-handler-woo"
                "cl-ppcre")
   :serial t
   :components

@@ -150,7 +150,7 @@ Each browser gets its own session with its own component instances. Register a f
 
 Options on `make-fluxion-app`:
 
-- **`:server :hunchentoot`** - Clack backend (default). Use `:woo` for production (see [GUIDE.md](GUIDE.md)).
+- **`:server :woo`** - Clack backend (default). Woo uses libev for async I/O. Use `:hunchentoot` for development if you prefer its debug mode. See [GUIDE.md](GUIDE.md).
 - **`:session-ttl 3600`** - seconds before idle sessions expire (default 1 hour).
 - **`:reaper-interval 60`** - how often the background reaper checks for expired sessions.
 

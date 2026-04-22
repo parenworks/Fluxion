@@ -11,7 +11,8 @@
 ;;;;   4. HTTP stack under load (concurrent GET/POST via dexador)
 ;;;;   5. Memory stability (before/after comparison, GC pressure)
 
-(ql:quickload '("fluxion" "fluxion/tests" "dexador" "bordeaux-threads") :silent t)
+(ql:quickload '("fluxion" "fluxion/tests" "dexador" "bordeaux-threads"
+                "clack-handler-woo") :silent t)
 
 (defpackage #:fluxion.load-test
   (:use #:cl)
@@ -212,9 +213,11 @@
 
 (defvar *load-test-app* nil)
 (defvar *load-test-port* 5299)
+(defvar *load-test-server* :hunchentoot)
 
 (defun start-load-test-server ()
-  (setf *load-test-app* (server:make-fluxion-app :port *load-test-port*))
+  (setf *load-test-app* (server:make-fluxion-app :port *load-test-port*
+                                                  :server *load-test-server*))
   (server:register-component-factory *load-test-app* "load-widget"
     (lambda () (make-instance 'load-test-widget)))
   (server:start *load-test-app*
@@ -233,7 +236,7 @@
     (setf *load-test-app* nil)))
 
 (defun test-http-stack ()
-  (report "=== Test 4: HTTP Stack Under Load ===")
+  (report "=== Test 4: HTTP Stack Under Load (~A) ===" *load-test-server*)
   (start-load-test-server)
   (sleep 0.5)
   (let ((base-url (format nil "http://127.0.0.1:~D" *load-test-port*))
@@ -339,9 +342,10 @@
 ;;; Main
 ;;; -------------------------------------------------------
 
-(defun run-load-tests ()
+(defun run-load-tests (&key (server :hunchentoot))
+  (setf *load-test-server* server)
   (format t "~%========================================~%")
-  (format t " Fluxion Load Test~%")
+  (format t " Fluxion Load Test (~A)~%" server)
   (format t "========================================~%~%")
   (let ((start-mem (gc-and-mem))
         (start-time (get-internal-real-time)))
@@ -366,5 +370,7 @@
       (report "Final memory: ~,1F MB (delta ~,1F MB)" end-mem (- end-mem start-mem))
       (format t "========================================~%"))))
 
-;; Run when loaded
-(run-load-tests)
+;; Run both backends when loaded
+(run-load-tests :server :hunchentoot)
+(terpri)
+(run-load-tests :server :woo)

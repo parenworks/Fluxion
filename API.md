@@ -186,7 +186,7 @@ For observing consistent state across multiple cells, use a computed cell rather
 - `:static-dir` - directory for serving static files under `/static/`.
 - `:session-ttl` - seconds before idle sessions expire (default 3600).
 - `:reaper-interval` - seconds between reaper runs (default 60).
-- `:server` - Clack backend keyword. `:hunchentoot` (default) for development, `:woo` for production. Woo uses libev for async I/O and handles many concurrent SSE connections with much lower thread overhead.
+- `:server` - Clack backend keyword. `:woo` (default) uses libev for async I/O and handles many concurrent SSE connections with minimal thread overhead. `:hunchentoot` is available as an alternative with better debug error pages.
 
 **`start (app page-handler &key port server)`** - start the server. `page-handler` is a function `(app session env)` that returns a Clack response list `(status headers body)`. Both `:port` and `:server` can override the values set in `make-fluxion-app`.
 

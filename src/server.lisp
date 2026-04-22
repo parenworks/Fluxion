@@ -227,15 +227,15 @@ If authenticated but lacking the role, returns 403 (or redirects to FORBIDDEN-UR
                :initform 5000)
    (server     :initarg :server
                :accessor app-server
-               :initform :hunchentoot
-               :documentation "Clack server backend. :hunchentoot (default) or :woo."))
+               :initform :woo
+               :documentation "Clack server backend. :woo (default) or :hunchentoot."))
   (:documentation "Top-level Fluxion application."))
 
 (defun make-fluxion-app (&key (port 5000) static-dir (session-ttl 3600)
-                             (reaper-interval 60) (server :hunchentoot))
+                             (reaper-interval 60) (server :woo))
   "Create a new Fluxion application instance.
-SERVER is the Clack backend: :hunchentoot (default) for development,
-:woo for production (requires libev)."
+SERVER is the Clack backend: :woo (default) or :hunchentoot.
+Woo uses libev for async I/O. Install libev-dev to use it."
   (make-instance 'fluxion-app :port port :static-dir static-dir
                               :session-ttl session-ttl
                               :reaper-interval reaper-interval

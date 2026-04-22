@@ -179,7 +179,19 @@ Use the router for multi-page applications:
 
 Fluxion uses [Clack](https://github.com/fukamachi/clack) as its server abstraction. You choose the backend:
 
-### Hunchentoot (Default)
+### Woo (Default)
+
+```lisp
+(fluxion.server:make-fluxion-app)  ; Woo is the default
+```
+
+- libev event loop (async I/O)
+- Handles thousands of concurrent SSE connections with minimal thread overhead
+- ~250x higher HTTP throughput than Hunchentoot in benchmarks
+- Requires `libev-dev` system package
+- The default for both development and production
+
+### Hunchentoot (Alternative)
 
 ```lisp
 (fluxion.server:make-fluxion-app :server :hunchentoot)
@@ -188,19 +200,7 @@ Fluxion uses [Clack](https://github.com/fukamachi/clack) as its server abstracti
 - Thread-per-connection model
 - Excellent error messages and debug mode
 - No native dependencies
-- Best for **development** and small deployments
-
-### Woo (Production)
-
-```lisp
-(fluxion.server:make-fluxion-app :server :woo)
-```
-
-- libev event loop (async I/O)
-- Handles thousands of concurrent SSE connections with minimal thread overhead
-- ~10x higher HTTP throughput than Hunchentoot
-- Requires `libev-dev` system package
-- Best for **production** deployments with many concurrent users
+- Useful if you want Hunchentoot's interactive debugger during development
 
 **Install libev:**
 
@@ -224,24 +224,24 @@ sudo pacman -S libev
 You can also override the backend at start time without recreating the app:
 
 ```lisp
-;; Develop with Hunchentoot
+;; Default (Woo)
 (fluxion.server:start app handler)
 
-;; Deploy with Woo
-(fluxion.server:start app handler :server :woo)
+;; Override to Hunchentoot for debugging
+(fluxion.server:start app handler :server :hunchentoot)
 ```
 
 ### Choosing a Backend
 
-|                  | Hunchentoot            | Woo                         |
-| ---------------- | ---------------------- | --------------------------- |
-| SSE connections  | 1 thread each           | event-loop, minimal overhead|
-| HTTP throughput  | ~180 req/s/thread      | ~1,800 req/s/thread         |
-| Debug experience | Excellent              | Minimal                     |
-| Native deps      | None                   | libev                       |
-| Recommended for  | Development, <100 users | Production, >100 users      |
+|                       | Woo (default)                | Hunchentoot               |
+| --------------------- | ---------------------------- | ------------------------- |
+| 1,600 GET requests    | 0.036s                       | 8.9s                      |
+| 1,600 POST requests   | 0.028s                       | 8.8s                      |
+| SSE connections       | event-loop, minimal overhead | 1 thread each             |
+| Debug experience      | Minimal                      | Excellent                 |
+| Native deps           | libev                        | None                      |
 
-For most Fluxion applications (internal tools, dashboards, team apps), Hunchentoot is perfectly adequate. Switch to Woo when you need to handle many concurrent SSE connections or high request volume.
+Woo is the default because its event-loop architecture is a natural fit for Fluxion's SSE-heavy workload. Use Hunchentoot when you want its interactive debugger during development.
 
 ---
 
