@@ -208,6 +208,9 @@ If authenticated but lacking the role, returns 403 (or redirects to FORBIDDEN-UR
    (reaper-thread :initform nil
                   :accessor app-reaper-thread
                   :documentation "Background thread that periodically removes expired sessions.")
+   (reaper-stop-flag :initform nil
+                     :accessor app-reaper-stop-flag
+                     :documentation "When T, the reaper thread exits on its next cycle.")
    (reaper-interval :initarg :reaper-interval
                     :accessor app-reaper-interval
                     :initform 60
@@ -767,38 +770,53 @@ HTML page response."
 ;;; -------------------------------------------------------
 
 (defun reap-sessions (app)
-  "Remove expired sessions from APP. Returns the number of sessions reaped."
+  "Remove expired sessions from APP. Closes event queues so SSE
+threads unblock and terminate cleanly. Returns the number reaped."
   (let ((ttl (app-session-ttl app))
-        (reaped 0))
+        (reaped 0)
+        (queues-to-close nil))
     (bt:with-lock-held ((app-session-lock app))
       (let ((to-remove nil))
         (maphash (lambda (sid session)
                    (when (session-expired-p session ttl)
-                     (push sid to-remove)))
+                     (push sid to-remove)
+                     (let ((q (session-event-queue session)))
+                       (when q (push q queues-to-close)))))
                  (app-sessions app))
         (dolist (sid to-remove)
           (remhash sid (app-sessions app))
           (incf reaped))))
+    ;; Close queues outside the session lock to avoid deadlock
+    (dolist (q queues-to-close)
+      (ignore-errors (close-event-queue q)))
     reaped))
 
 (defun start-session-reaper (app)
   "Start the background session reaper thread for APP."
   (stop-session-reaper app)
+  (setf (app-reaper-stop-flag app) nil)
   (setf (app-reaper-thread app)
         (bt:make-thread
          (lambda ()
            (loop
              (sleep (app-reaper-interval app))
-             (unless (app-handler app)
+             (when (app-reaper-stop-flag app)
                (return))
-             (let ((n (reap-sessions app)))
-               (when (plusp n)
-                 (format t "[fluxion] Reaped ~D expired session~:P~%" n)))))
+             (handler-case
+                 (let ((n (reap-sessions app)))
+                   (when (plusp n)
+                     (format t "[fluxion] Reaped ~D expired session~:P~%" n)))
+               (error (e)
+                 (format t "[fluxion] Session reaper error: ~A~%" e)))))
          :name "fluxion-session-reaper")))
 
 (defun stop-session-reaper (app)
-  "Stop the background session reaper thread for APP."
-  (when (and (app-reaper-thread app)
-             (bt:thread-alive-p (app-reaper-thread app)))
-    (bt:destroy-thread (app-reaper-thread app)))
-  (setf (app-reaper-thread app) nil))
+  "Stop the background session reaper thread gracefully.
+Sets the stop flag and waits briefly for the thread to exit."
+  (when (app-reaper-thread app)
+    (setf (app-reaper-stop-flag app) t)
+    (when (bt:thread-alive-p (app-reaper-thread app))
+      ;; Give the thread time to notice the flag and exit
+      (ignore-errors
+        (bt:join-thread (app-reaper-thread app))))
+    (setf (app-reaper-thread app) nil)))

@@ -175,7 +175,16 @@
    #:push-event
    #:push-events
    #:push-component-patch
-   #:parse-request-body))
+   #:parse-request-body
+   #:app-session-ttl
+   #:app-reaper-interval
+   #:reap-sessions
+   #:touch-session
+   #:session-expired-p
+   #:close-event-queue
+   #:ensure-event-queue
+   #:start-session-reaper
+   #:stop-session-reaper))
 
 (defpackage #:fluxion
   (:use #:cl)

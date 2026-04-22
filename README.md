@@ -153,6 +153,8 @@ Session options on `make-fluxion-app`:
 - **`:session-ttl 3600`** - seconds before idle sessions expire (default 1 hour).
 - **`:reaper-interval 60`** - how often the background reaper checks for expired sessions.
 
+The reaper runs in a background thread and uses a stop flag for graceful shutdown (no `destroy-thread`). When a session is reaped, its SSE event queue is closed so the streaming thread unblocks and terminates cleanly. The reaper catches and logs errors instead of crashing, so a single corrupt session won't take down the cleanup loop.
+
 ## CSRF Protection
 
 Every session has a unique CSRF token. Pass it to `render-page` and it gets embedded in a `<meta>` tag. The client runtime reads the tag and includes the token as an `X-CSRF-Token` header on every POST request. The server validates the header before dispatching any action. Requests with a missing or wrong token get a 403 Forbidden response.

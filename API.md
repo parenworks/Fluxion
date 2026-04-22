@@ -211,6 +211,20 @@ For observing consistent state across multiple cells, use a computed cell rather
 
 **`session-csrf-token (session)`** - the session's CSRF token string. Pass this to `render-page` so the client can include it in POST requests.
 
+### Session Reaping
+
+**`reap-sessions (app)`** - remove all expired sessions from the app. Closes their event queues so SSE streaming threads terminate cleanly. Returns the number of sessions reaped. Called automatically by the reaper thread but can also be called manually.
+
+**`touch-session (session)`** - update the session's last-accessed-at timestamp. Called automatically on each HTTP request via `get-or-create-session`. Prevents the session from being reaped.
+
+**`session-expired-p (session ttl)`** - return T if the session has not been accessed within `ttl` seconds.
+
+**`start-session-reaper (app)`** - start the background reaper thread. Called automatically by `start`.
+
+**`stop-session-reaper (app)`** - stop the reaper thread gracefully via a stop flag. Called automatically by `stop`.
+
+The reaper thread uses `handler-case` to catch and log errors during each cycle, so a problem with one session does not crash the reaper. When sessions are reaped, their event queues are closed outside the session lock to avoid potential deadlocks with the SSE streaming thread.
+
 ### CSRF Protection
 
 Every session gets a unique CSRF token on creation. The server rejects any POST request where the `X-CSRF-Token` header does not match the session's token (returns 403). The client runtime reads the token from a `<meta name="fluxion-csrf">` tag and sends it automatically.

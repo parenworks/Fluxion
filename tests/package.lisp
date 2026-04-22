@@ -55,6 +55,10 @@
   :description "Thread safety for the cell graph."
   :in fluxion-suite)
 
+(def-suite session-reaper-suite
+  :description "Session reaping under load."
+  :in fluxion-suite)
+
 (defun run-all-tests ()
   "Run the full Fluxion test suite. Returns T if all tests pass."
   (run! 'fluxion-suite))
