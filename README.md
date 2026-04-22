@@ -6,6 +6,8 @@ Fluxion lets you build reactive web interfaces using CLOS. You define components
 
 The server owns the state. The browser just follows instructions.
 
+The reactive layer is built on Lattice, a propagator-inspired engine where cells hold values, computed cells derive from them automatically, and propagators wire up bidirectional constraints. If you know the Radul/Sussman propagator work, that is the lineage. If you don't, it just means your components react to state changes without you having to wire every update by hand.
+
 ## Core Ideas
 
 - **CLOS components** - UI components are ordinary CLOS classes with `render` and `handle-action` generic functions.
@@ -28,6 +30,10 @@ The server owns the state. The browser just follows instructions.
 ;; Or the todo list
 (fluxion.examples.todo:start-todo)
 ;; Open http://localhost:5000
+
+;; Or the temperature converter (propagators)
+(fluxion.examples.converter:start-converter)
+;; Open http://localhost:5000
 ```
 
 ## Architecture
@@ -49,8 +55,9 @@ fluxion/
 ├── static/
 │   └── fluxion.js           ; Compiled client runtime (generated)
 ├── examples/
-│   ├── counter.lisp         ; Counter demo
-│   └── todo.lisp            ; Todo list demo
+│   ├── counter.lisp         ; Counter demo (cells + computed)
+│   ├── todo.lisp            ; Todo list demo (sessions, data-* attrs)
+│   └── converter.lisp       ; Temperature converter (bidirectional propagators)
 └── README.md
 ```
 
@@ -139,6 +146,61 @@ data: {"script":"fluxionShowError('Something went wrong')"}
 | `data-bind="signal-name"` | Two-way bind input value to a client-side signal |
 | `data-text="$signal-name"` | Display signal value as text content |
 
+## Lattice - Reactive Engine
+
+Fluxion's reactive layer is called Lattice. It has three building blocks.
+
+**Cells** hold a value and notify watchers when it changes.
+
+```lisp
+(let ((count (fluxion.cells:make-cell 0 :name "count")))
+  (fluxion.cells:watch count
+    (lambda (new old)
+      (format t "count changed: ~A -> ~A~%" old new)))
+  (setf (fluxion.cells:cell-value count) 1))
+;; => count changed: 0 -> 1
+```
+
+**Computed cells** derive their value from other cells. Dependencies are tracked automatically - you just read cells inside the thunk and Lattice figures out the graph.
+
+```lisp
+(let* ((count (fluxion.cells:make-cell 5))
+       (label (fluxion.cells:make-computed
+               (lambda ()
+                 (format nil "Count is ~D" (fluxion.cells:cell-value count))))))
+  (fluxion.cells:cell-value label))
+;; => "Count is 5"
+;; Changing count automatically recomputes label.
+```
+
+**Propagators** connect input cells to output cells through a function. They support bidirectional networks - CL's exact rational arithmetic means values converge perfectly with no floating-point oscillation.
+
+```lisp
+(let ((celsius    (fluxion.cells:make-cell 0))
+      (fahrenheit (fluxion.cells:make-cell 32)))
+  ;; Two propagators form a bidirectional constraint
+  (fluxion.cells:make-propagator
+   :inputs (list celsius)
+   :fn (lambda (c) (+ (* c 9/5) 32))
+   :outputs (list fahrenheit))
+  (fluxion.cells:make-propagator
+   :inputs (list fahrenheit)
+   :fn (lambda (f) (* (- f 32) 5/9))
+   :outputs (list celsius))
+  ;; Set either side and the other updates
+  (setf (fluxion.cells:cell-value celsius) 100)
+  (fluxion.cells:cell-value fahrenheit))
+;; => 212
+```
+
+To connect a cell to a component so that changes trigger automatic DOM patches:
+
+```lisp
+(fluxion.cells:connect my-cell my-component)
+```
+
+The counter example uses cells and a computed cell. The temperature converter example uses bidirectional propagators. Both are in the `examples/` directory.
+
 ## Error Handling
 
 Server-side action errors are sent back as SSE script events that trigger an error toast in the browser. The toast auto-dismisses after 8 seconds or can be closed manually. You can also call `fluxionShowError("message")` from JavaScript or from a `fluxion-script` event.
@@ -166,10 +228,10 @@ Components have a `dirty-p` flag and a `last-html` cache. The `defaction` macro 
 ## Roadmap
 
 - **v0.1** - manual actions and HTML patches
-- **v0.2** - dirty tracking, sessions, defaction, data-* attributes (current)
-- **v0.3** - server-side cells/signals
-- **v0.4** - computed cells
-- **v0.5** - Lattice: propagator-inspired reactive dependency graph
+- **v0.2** - dirty tracking, sessions, defaction, data-* attributes
+- **v0.3** - reactive cells with watchers
+- **v0.4** - computed cells with automatic dependency tracking
+- **v0.5** - Lattice: propagator-inspired reactive dependency graph (current)
 
 ## Licence
 
