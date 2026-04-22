@@ -29,6 +29,25 @@
      (:file "render")
      (:file "server")))))
 
+(defsystem "fluxion/tests"
+  :name "fluxion-tests"
+  :version "0.1.0"
+  :description "Test suite for Fluxion."
+  :depends-on ("fluxion" "fluxion/client" "fiveam")
+  :serial t
+  :components
+  ((:module "tests"
+    :serial t
+    :components
+    ((:file "package")
+     (:file "test-protocol")
+     (:file "test-events")
+     (:file "test-cells")
+     (:file "test-computed")
+     (:file "test-propagators")
+     (:file "test-components")
+     (:file "test-server")))))
+
 (defsystem "fluxion/client"
   :name "fluxion-client"
   :version "0.1.0"
