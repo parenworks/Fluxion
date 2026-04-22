@@ -176,6 +176,28 @@ Propagators include a re-entrance guard to prevent infinite cycles in bidirectio
 
 Every session gets a unique CSRF token on creation. The server rejects any POST request where the `X-CSRF-Token` header does not match the session's token (returns 403). The client runtime reads the token from a `<meta name="fluxion-csrf">` tag and sends it automatically.
 
+### Authentication
+
+**`session-user (session)`** - the application-defined user data stored on the session. NIL when not authenticated. Can be any value: string, plist, CLOS object, etc.
+
+**`session-user-roles (session)`** - list of role keywords for the authenticated user (e.g. `(:admin :editor)`).
+
+**`authenticated-p (session)`** - return T if the session has an authenticated user (i.e. `session-user` is non-NIL).
+
+**`authenticate (session user &key roles)`** - set the authenticated user on the session. `user` is any application-defined value. `:roles` is an optional list of role keywords. Regenerates the CSRF token to prevent session fixation.
+
+**`logout (session)`** - clear the user and roles from the session. Regenerates the CSRF token.
+
+**`has-role-p (session role)`** - return T if the session's user has `role` in their roles list. Returns NIL for unauthenticated sessions.
+
+**`require-auth (session &key login-url)`** - auth guard for page handlers. Returns NIL if the user is authenticated (proceed normally). Returns a 303 redirect response to `login-url` (default `"/login"`) if not authenticated. Use with `or`:
+
+```lisp
+(or (require-auth session) (render-my-page ...))
+```
+
+**`require-role (session role &key login-url forbidden-url)`** - role guard for page handlers. Returns NIL if the user has the role. Redirects to `login-url` if not authenticated. Returns 403 if authenticated but lacking the role, or redirects to `forbidden-url` if provided.
+
 ### Server Push
 
 These functions push events to a session's persistent SSE connection (the `/sse` endpoint).

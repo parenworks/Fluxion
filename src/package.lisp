@@ -124,6 +124,14 @@
    #:session-component
    #:session-components
    #:session-csrf-token
+   #:session-user
+   #:session-user-roles
+   #:authenticated-p
+   #:authenticate
+   #:logout
+   #:has-role-p
+   #:require-auth
+   #:require-role
    #:app-handler
    #:app-session-lock
    #:app-sessions
@@ -159,6 +167,14 @@
    #:session
    #:session-component
    #:session-csrf-token
+   #:session-user
+   #:session-user-roles
+   #:authenticated-p
+   #:authenticate
+   #:logout
+   #:has-role-p
+   #:require-auth
+   #:require-role
    #:push-event
    #:push-events
    #:push-component-patch

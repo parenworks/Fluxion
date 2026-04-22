@@ -148,6 +148,108 @@
     (is (= 403 (first resp)))))
 
 ;;; -------------------------------------------------------
+;;; Authentication
+;;; -------------------------------------------------------
+
+(test session-starts-unauthenticated
+  "New sessions have no user."
+  (let ((s (make-instance 'fluxion.server:session :id "auth-test")))
+    (is-false (fluxion.server:authenticated-p s))
+    (is (null (fluxion.server:session-user s)))
+    (is (null (fluxion.server:session-user-roles s)))))
+
+(test authenticate-sets-user
+  "authenticate stores the user on the session."
+  (let ((s (make-instance 'fluxion.server:session :id "auth-test")))
+    (fluxion.server:authenticate s "alice" :roles '(:admin :editor))
+    (is-true (fluxion.server:authenticated-p s))
+    (is (string= "alice" (fluxion.server:session-user s)))
+    (is (equal '(:admin :editor) (fluxion.server:session-user-roles s)))))
+
+(test authenticate-regenerates-csrf
+  "authenticate regenerates the CSRF token to prevent session fixation."
+  (let* ((s (make-instance 'fluxion.server:session :id "auth-test"))
+         (old-token (fluxion.server:session-csrf-token s)))
+    (fluxion.server:authenticate s "bob")
+    (is (not (string= old-token (fluxion.server:session-csrf-token s))))))
+
+(test logout-clears-user
+  "logout clears user and roles."
+  (let ((s (make-instance 'fluxion.server:session :id "auth-test")))
+    (fluxion.server:authenticate s "alice" :roles '(:admin))
+    (fluxion.server:logout s)
+    (is-false (fluxion.server:authenticated-p s))
+    (is (null (fluxion.server:session-user s)))
+    (is (null (fluxion.server:session-user-roles s)))))
+
+(test logout-regenerates-csrf
+  "logout regenerates the CSRF token."
+  (let* ((s (make-instance 'fluxion.server:session :id "auth-test")))
+    (fluxion.server:authenticate s "alice")
+    (let ((post-auth-token (fluxion.server:session-csrf-token s)))
+      (fluxion.server:logout s)
+      (is (not (string= post-auth-token (fluxion.server:session-csrf-token s)))))))
+
+(test has-role-p-checks-membership
+  "has-role-p returns T when the user has the role."
+  (let ((s (make-instance 'fluxion.server:session :id "auth-test")))
+    (fluxion.server:authenticate s "alice" :roles '(:admin :editor))
+    (is-true (fluxion.server:has-role-p s :admin))
+    (is-true (fluxion.server:has-role-p s :editor))
+    (is-false (fluxion.server:has-role-p s :superuser))))
+
+(test has-role-p-nil-when-unauthenticated
+  "has-role-p returns NIL for unauthenticated sessions."
+  (let ((s (make-instance 'fluxion.server:session :id "auth-test")))
+    (is-false (fluxion.server:has-role-p s :admin))))
+
+(test require-auth-passes-when-authenticated
+  "require-auth returns NIL when the user is authenticated."
+  (let ((s (make-instance 'fluxion.server:session :id "auth-test")))
+    (fluxion.server:authenticate s "alice")
+    (is (null (fluxion.server:require-auth s)))))
+
+(test require-auth-redirects-when-unauthenticated
+  "require-auth returns a 303 redirect when not authenticated."
+  (let* ((s (make-instance 'fluxion.server:session :id "auth-test"))
+         (resp (fluxion.server:require-auth s)))
+    (is (= 303 (first resp)))
+    (is (string= "/login" (getf (second resp) :location)))))
+
+(test require-auth-custom-login-url
+  "require-auth accepts a custom login URL."
+  (let* ((s (make-instance 'fluxion.server:session :id "auth-test"))
+         (resp (fluxion.server:require-auth s :login-url "/sign-in")))
+    (is (string= "/sign-in" (getf (second resp) :location)))))
+
+(test require-role-passes-with-role
+  "require-role returns NIL when the user has the role."
+  (let ((s (make-instance 'fluxion.server:session :id "auth-test")))
+    (fluxion.server:authenticate s "alice" :roles '(:admin))
+    (is (null (fluxion.server:require-role s :admin)))))
+
+(test require-role-redirects-when-unauthenticated
+  "require-role redirects to login when not authenticated."
+  (let* ((s (make-instance 'fluxion.server:session :id "auth-test"))
+         (resp (fluxion.server:require-role s :admin)))
+    (is (= 303 (first resp)))))
+
+(test require-role-403-when-lacking-role
+  "require-role returns 403 when authenticated but lacking the role."
+  (let ((s (make-instance 'fluxion.server:session :id "auth-test")))
+    (fluxion.server:authenticate s "alice" :roles '(:viewer))
+    (let ((resp (fluxion.server:require-role s :admin)))
+      (is (= 403 (first resp))))))
+
+(test require-role-forbidden-redirect
+  "require-role can redirect instead of 403 when given :forbidden-url."
+  (let ((s (make-instance 'fluxion.server:session :id "auth-test")))
+    (fluxion.server:authenticate s "alice" :roles '(:viewer))
+    (let ((resp (fluxion.server:require-role s :admin :forbidden-url "/denied")))
+      (is (= 303 (first resp)))
+      (is (string= "/denied" (getf (second resp) :location))))))
+
+;;; -------------------------------------------------------
 ;;; App creation
 ;;; -------------------------------------------------------
 

@@ -167,6 +167,58 @@ Every session has a unique CSRF token. Pass it to `render-page` and it gets embe
 
 This is automatic. Once you pass `:csrf-token`, the client handles the rest. No extra wiring needed.
 
+## Authentication
+
+Fluxion provides session-based auth primitives. You bring your own credential checking logic. The framework stores user data on the session and gives you guard functions for page handlers.
+
+### Login flow
+
+```lisp
+;; In a login action, after validating credentials:
+(fluxion.components:defaction login-form :submit (c params)
+  (let ((username (cdr (assoc :username params)))
+        (password (cdr (assoc :password params))))
+    (if (check-credentials username password)  ; your function
+        (progn
+          (fluxion.server:authenticate *current-session* username
+            :roles (get-user-roles username))
+          (list (fluxion.events:make-redirect-event "/dashboard")))
+        (list (fluxion.events:make-script-event
+               "fluxionShowError('Invalid credentials')")))))
+```
+
+Both `authenticate` and `logout` regenerate the CSRF token to prevent session fixation attacks.
+
+### Protecting pages
+
+```lisp
+;; In your page handler:
+(lambda (app session env)
+  (or (fluxion.server:require-auth session)
+      (list 200
+            '(:content-type "text/html")
+            (list (render-dashboard session)))))
+```
+
+`require-auth` returns NIL when the user is logged in (meaning: proceed normally). When the user is not authenticated, it returns a 303 redirect to `/login` (configurable with `:login-url`).
+
+### Role-based access
+
+```lisp
+(or (fluxion.server:require-role session :admin)
+    (render-admin-panel session))
+```
+
+`require-role` does three things: redirects to login if not authenticated, returns 403 if authenticated but lacking the role, or returns NIL if the user has the role. You can pass `:forbidden-url` to redirect instead of returning 403.
+
+### Logout
+
+```lisp
+(fluxion.server:logout session)
+```
+
+Clears the user and roles from the session and regenerates the CSRF token.
+
 ## Server Push (Persistent SSE)
 
 Every browser automatically opens an EventSource connection to `/sse`. The server holds it open and can push updates at any time. No user interaction needed.
