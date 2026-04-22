@@ -6,7 +6,7 @@ Fluxion is a framework for building reactive web UIs entirely in Common Lisp. Co
 
 The server owns the state. The browser follows instructions.
 
-The reactive layer is called Lattice. Cells hold values, computed cells derive from them automatically, and propagators wire up bidirectional constraints. If you know the Radul/Sussman propagator work, that is the lineage. If you don't, it means your components react to state changes without you wiring every update by hand.
+The reactive layer is called Lattice. Cells hold values, computed cells derive from them automatically, and propagators wire up bidirectional constraints. Transactions guarantee glitch-free propagation - you never see inconsistent intermediate state. If you know the Radul/Sussman propagator work, that is the lineage. If you don't, it means your components react to state changes without you wiring every update by hand.
 
 ## Core Ideas
 
@@ -366,6 +366,47 @@ Connect input cells to output cells through a function. They support bidirection
 ;; => 212
 ```
 
+### Transactions (glitch-free propagation)
+
+In a dependency diamond (A feeds B and C, both feed D), changing A without a transaction causes D to recompute twice - once with B updated but C stale, then again when C catches up. That first recomputation is a glitch. D sees state that never should have existed.
+
+Lattice solves this with height-based topological scheduling:
+
+- Every cell tracks its height in the dependency graph. Base cells are 0, computed cells are `max(dependency heights) + 1`.
+- `with-transaction` defers all downstream notifications into a priority queue.
+- When the transaction commits, the queue is flushed in height order - lowest first. All cells at the same level update before anything above them recomputes.
+- Each cell recomputes at most once per transaction (deduplication).
+
+```lisp
+(let* ((a (fluxion.cells:make-cell 1))
+       (b (fluxion.cells:make-computed
+           (lambda () (* 10 (fluxion.cells:cell-value a)))))
+       (c (fluxion.cells:make-computed
+           (lambda () (+ 100 (fluxion.cells:cell-value a)))))
+       (d (fluxion.cells:make-computed
+           (lambda () (list (fluxion.cells:cell-value b)
+                            (fluxion.cells:cell-value c))))))
+  ;; Without transaction: D fires twice (glitch)
+  (setf (fluxion.cells:cell-value a) 2)
+  ;; D saw (10 102) then (20 102)
+
+  ;; With transaction: D fires once, consistent
+  (fluxion.cells:with-transaction
+    (setf (fluxion.cells:cell-value a) 3))
+  ;; D saw (30 103) exactly once
+```
+
+Transactions nest. Inner transactions are absorbed by the outermost - no flush happens until the outer one completes. Propagators use transactions internally, so propagator output writes are always glitch-free.
+
+You can also batch multiple source cell changes into a single transaction:
+
+```lisp
+(fluxion.cells:with-transaction
+  (setf (fluxion.cells:cell-value x) 10)
+  (setf (fluxion.cells:cell-value y) 20))
+;; Anything depending on both x and y recomputes once with both new values.
+```
+
 ### Connecting cells to components
 
 ```lisp
@@ -496,7 +537,8 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment with Caddy, nginx, 
 - **v0.4** - computed cells with automatic dependency tracking
 - **v0.5** - Lattice: propagator-inspired reactive engine
 - **v0.6** - DOM morphing, defcomponent, persistent SSE server-push
-- **v0.7** - CSRF protection, test suite, authentication, routing, form validation (current)
+- **v0.7** - CSRF protection, test suite, authentication, routing, form validation
+- **v0.8** - glitch-free transactions, height-based topological scheduling (current)
 
 ## Licence
 

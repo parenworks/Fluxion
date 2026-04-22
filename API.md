@@ -88,9 +88,11 @@ The reactive engine. `fluxion.lattice` is a package nickname for `fluxion.cells`
 
 **`cell-name (cell)`** - the cell's name string.
 
-**`watch (cell fn)`** - add a watcher function. `fn` is called as `(funcall fn new-value old-value)` whenever the cell's value changes. Returns `fn`.
+**`cell-height (cell)`** - the cell's height in the dependency graph. Base cells are 0, computed cells are `max(dependency heights) + 1`. Used by the transaction system for topological ordering.
 
-**`unwatch (cell fn)`** - remove a previously added watcher.
+**`watch (cell fn &key target)`** - add a watcher function. `fn` is called as `(funcall fn new-value old-value)` whenever the cell's value changes. Returns a `cell-watcher` struct. If `:target` is provided (a cell or computed-cell), the transaction system uses it for height-based scheduling instead of calling `fn` immediately.
+
+**`unwatch (cell entry)`** - remove a previously added watcher. `entry` is the `cell-watcher` struct returned by `watch`.
 
 ### Computed Cells
 
@@ -128,6 +130,26 @@ Propagators include a re-entrance guard to prevent infinite cycles in bidirectio
  :fn (lambda (f) (* (- f 32) 5/9))
  :outputs (list celsius))
 ```
+
+### Transactions
+
+**`with-transaction (&body body)`** - macro. Execute `body` within a transaction. All cell notifications are deferred into a priority queue and flushed in height order when the transaction completes. This prevents glitches in diamond dependencies.
+
+Transactions nest: inner transactions are absorbed by the outermost. Only the outermost transaction flushes the queue. Propagators use transactions internally.
+
+```lisp
+;; Batch two source changes - dependents recompute once
+(with-transaction
+  (setf (cell-value x) 10)
+  (setf (cell-value y) 20))
+```
+
+Internals (not typically called directly):
+
+- `*transaction*` - dynamic variable, non-nil during an active transaction.
+- `tx` struct - holds the deferred queue and deduplication set.
+- `tx-enqueue (tx cell)` - add a cell to the deferred queue.
+- `tx-flush (tx)` - process the queue in height order until empty.
 
 ### Component Connection
 

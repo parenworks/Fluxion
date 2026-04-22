@@ -46,6 +46,7 @@
      (:file "test-events")
      (:file "test-cells")
      (:file "test-computed")
+     (:file "test-transactions")
      (:file "test-propagators")
      (:file "test-components")
      (:file "test-server")

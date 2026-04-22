@@ -27,6 +27,10 @@
   :description "Computed cells with dependency tracking."
   :in fluxion-suite)
 
+(def-suite transactions-suite
+  :description "Glitch-free transactions and topological scheduling."
+  :in fluxion-suite)
+
 (def-suite propagators-suite
   :description "Propagators and bidirectional constraints."
   :in fluxion-suite)

@@ -7,6 +7,7 @@
 ;;;;   v0.3 - cells with watchers
 ;;;;   v0.4 - computed cells with automatic dependency tracking
 ;;;;   v0.5 - propagators (this file)
+;;;;   v0.6 - glitch-free transactions (height-based topological scheduling)
 
 (in-package #:fluxion.cells)
 
@@ -38,6 +39,61 @@ Returns them in the order they were collected."
       (setf (car *pending-events*) nil))))
 
 ;;; -------------------------------------------------------
+;;; Transaction system (glitch-free propagation)
+;;; -------------------------------------------------------
+;;;
+;;; Without transactions, a diamond dependency (A->B, A->C, B->D, C->D)
+;;; causes D to see an inconsistent intermediate state (glitch) because B
+;;; fires before C has updated.
+;;;
+;;; Solution: height-based topological scheduling.
+;;; - Each cell has a `height`: 0 for base cells, max(dep heights)+1 for derived.
+;;; - During a transaction, notifications are deferred into a priority queue.
+;;; - The queue is flushed in height order, so derived cells at the same level
+;;;   all update before any cell at a higher level is recomputed.
+;;; - Each cell is recomputed at most once per transaction (deduplication).
+
+(defvar *transaction* nil
+  "When non-nil, a transaction is active and notifications are deferred.
+Bound to a transaction struct by WITH-TRANSACTION.")
+
+(defstruct tx
+  (queue    nil :type list)
+  (seen     (make-hash-table :test 'eq) :type hash-table))
+
+(defun tx-enqueue (tx cell)
+  "Add CELL to the transaction's priority queue (unless already queued)."
+  (unless (gethash cell (tx-seen tx))
+    (setf (gethash cell (tx-seen tx)) t)
+    (push cell (tx-queue tx))))
+
+(defun tx-flush (tx)
+  "Process all queued cells in height order (lowest first).
+Cells may enqueue further cells during processing; loop until empty."
+  (loop while (tx-queue tx) do
+    (let ((sorted (sort (tx-queue tx) #'< :key #'cell-height)))
+      (setf (tx-queue tx) nil)
+      (clrhash (tx-seen tx))
+      (dolist (cell sorted)
+        (typecase cell
+          (computed-cell (recompute cell))
+          (t (notify-watchers cell
+                              (slot-value cell 'value)
+                              (slot-value cell 'value))))))))
+
+(defmacro with-transaction (&body body)
+  "Execute BODY within a transaction. All cell notifications are deferred
+and flushed in topological (height) order at the end, preventing glitches.
+Transactions nest: only the outermost transaction flushes."
+  (let ((outer (gensym "OUTER-")))
+    `(let ((,outer *transaction*))
+       (if ,outer
+           (progn ,@body)
+           (let ((*transaction* (make-tx)))
+             (prog1 (progn ,@body)
+               (tx-flush *transaction*)))))))
+
+;;; -------------------------------------------------------
 ;;; Cell class
 ;;; -------------------------------------------------------
 
@@ -56,7 +112,12 @@ Returns them in the order they were collected."
    (equalfn  :initarg :test
              :accessor cell-test
              :initform #'equal
-             :documentation "Comparison function to detect value changes."))
+             :documentation "Comparison function to detect value changes.")
+   (height   :initarg :height
+             :accessor cell-height
+             :initform 0
+             :type fixnum
+             :documentation "Topological height. 0 for base cells, max(dep)+1 for derived."))
   (:documentation "A reactive value container that notifies watchers on change."))
 
 (defun make-cell (value &key name (test #'equal))
@@ -85,33 +146,68 @@ When called inside a computed cell's thunk, records the read for dependency trac
   (slot-value cell 'value))
 
 (defun (setf cell-value) (new-value cell)
-  "Set CELL to NEW-VALUE. Notifies watchers if the value changed."
+  "Set CELL to NEW-VALUE. Notifies watchers if the value changed.
+  Inside a transaction, downstream notifications are deferred."
   (let ((old-value (slot-value cell 'value)))
     (unless (funcall (cell-test cell) old-value new-value)
       (setf (slot-value cell 'value) new-value)
-      (notify-watchers cell new-value old-value)))
+      (if *transaction*
+          ;; Defer: enqueue downstream dependents
+          (dolist (entry (cell-watchers cell))
+            (let ((target (watcher-target entry)))
+              (if target
+                  (tx-enqueue *transaction* target)
+                  ;; Non-cell watchers (e.g. component connectors) fire immediately
+                  (funcall (cell-watcher-fn entry) new-value old-value))))
+          (notify-watchers cell new-value old-value))))
   new-value)
 
 ;;; -------------------------------------------------------
 ;;; Watchers
 ;;; -------------------------------------------------------
 
-(defun watch (cell fn)
+;;; Watcher entries: a watcher is either a plain function or a tagged
+;;; entry that carries a reference to the target cell (for transaction
+;;; scheduling).  We use a simple struct wrapper.
+
+(defstruct cell-watcher
+  "A watcher entry pairing a callback with an optional target cell for transaction ordering."
+  (fn     nil :type (or function null))
+  (target nil))
+
+(defun watch (cell fn &key target)
   "Register FN as a watcher on CELL.
 FN is called with (new-value old-value) whenever the cell changes.
-Returns FN."
-  (pushnew fn (cell-watchers cell))
-  fn)
+TARGET optionally references the downstream cell (for transaction scheduling).
+Returns the watcher entry."
+  (let ((entry (make-cell-watcher :fn fn :target target)))
+    (push entry (cell-watchers cell))
+    entry))
 
-(defun unwatch (cell fn)
-  "Remove FN from CELL's watchers."
-  (setf (cell-watchers cell) (remove fn (cell-watchers cell)))
-  fn)
+(defun unwatch (cell entry)
+  "Remove a watcher ENTRY from CELL's watchers.
+ENTRY may be a cell-watcher struct or the original function."
+  (setf (cell-watchers cell)
+        (remove entry (cell-watchers cell)
+               :test (lambda (e w)
+                       (if (cell-watcher-p e)
+                           (eq e w)
+                           (and (cell-watcher-p w)
+                                (eq e (cell-watcher-fn w)))))))
+  entry)
+
+(defun watcher-target (entry)
+  "Return the target cell of a watcher entry, or NIL."
+  (when (cell-watcher-p entry)
+    (cell-watcher-target entry)))
 
 (defun notify-watchers (cell new-value old-value)
   "Call all watchers of CELL with the new and old values."
-  (dolist (fn (cell-watchers cell))
-    (funcall fn new-value old-value)))
+  (dolist (entry (cell-watchers cell))
+    (if (cell-watcher-p entry)
+        (funcall (cell-watcher-fn entry) new-value old-value)
+        ;; Legacy: bare function (shouldn't happen but defensive)
+        (funcall entry new-value old-value))))
 
 ;;; -------------------------------------------------------
 ;;; Component integration
@@ -121,14 +217,14 @@ Returns FN."
   "Connect CELL to COMPONENT so that changes auto-patch.
 When CELL's value changes, COMPONENT is re-rendered and a patch event
 is collected into *pending-events* (if bound).
-Returns the watcher function (useful for later disconnection)."
-  (let ((watcher (lambda (new-value old-value)
-                   (declare (ignore new-value old-value))
-                   (fluxion.components:mark-dirty component)
-                   (let ((events (fluxion.components:patch-component component :mode mode)))
-                     (collect-events events)))))
-    (watch cell watcher)
-    watcher))
+Returns the watcher entry (useful for later disconnection)."
+  (let ((fn (lambda (new-value old-value)
+              (declare (ignore new-value old-value))
+              (fluxion.components:mark-dirty component)
+              (let ((events (fluxion.components:patch-component component :mode mode)))
+                (collect-events events)))))
+    ;; Component watchers have no target cell (they fire immediately even in transactions)
+    (watch cell fn)))
 
 (defun disconnect (cell watcher)
   "Remove a previously connected watcher from CELL."
@@ -161,31 +257,48 @@ other cells to produce a value. Dependencies are tracked automatically."
 
 (defun recompute (computed)
   "Recalculate COMPUTED's value by running its thunk.
-Discovers dependencies via *tracking-reads* and rewires watchers."
+Discovers dependencies via *tracking-reads* and rewires watchers.
+Updates height to max(dep heights) + 1 for topological ordering."
   (let* ((*tracking-reads* (list nil))
          (new-value (funcall (computed-thunk computed)))
          (new-deps (car *tracking-reads*))
          (old-deps (computed-dependencies computed)))
-    ;; Unwire old dependencies that are no longer read
-    (let ((update-fn (or (computed-update-fn computed)
-                         (let ((fn (lambda (nv ov)
-                                     (declare (ignore nv ov))
-                                     (recompute computed))))
-                           (setf (computed-update-fn computed) fn)
-                           fn))))
+    ;; Update height: max(dependency heights) + 1
+    (setf (cell-height computed)
+          (1+ (reduce #'max new-deps :key #'cell-height :initial-value 0)))
+    ;; Rewire watchers on dependencies
+    (let ((update-fn (computed-update-fn computed)))
+      (unless update-fn
+        (setf update-fn (lambda (nv ov)
+                          (declare (ignore nv ov))
+                          (recompute computed)))
+        (setf (computed-update-fn computed) update-fn))
+      ;; Remove old watchers
       (dolist (dep old-deps)
         (unless (member dep new-deps)
-          (unwatch dep update-fn)))
-      ;; Wire new dependencies
+          ;; Find and remove the watcher entry for this computed
+          (setf (cell-watchers dep)
+                (remove-if (lambda (w)
+                             (and (cell-watcher-p w)
+                                  (eq (cell-watcher-target w) computed)))
+                           (cell-watchers dep)))))
+      ;; Add new watchers with target reference for transaction scheduling
       (dolist (dep new-deps)
         (unless (member dep old-deps)
-          (watch dep update-fn)))
+          (watch dep update-fn :target computed)))
       (setf (computed-dependencies computed) new-deps))
     ;; Update the value and notify watchers if changed
     (let ((old-value (slot-value computed 'value)))
       (unless (funcall (cell-test computed) old-value new-value)
         (setf (slot-value computed 'value) new-value)
-        (notify-watchers computed new-value old-value)))
+        (if *transaction*
+            ;; Enqueue downstream dependents
+            (dolist (entry (cell-watchers computed))
+              (let ((target (watcher-target entry)))
+                (if target
+                    (tx-enqueue *transaction* target)
+                    (funcall (cell-watcher-fn entry) new-value old-value))))
+            (notify-watchers computed new-value old-value))))
     new-value))
 
 ;;; -------------------------------------------------------
@@ -253,19 +366,21 @@ For multiple outputs, FN returns a list of values."
 
 (defun fire-propagator (propagator)
   "Run the propagator: read inputs, apply function, write outputs.
-Returns immediately if this propagator is already firing (re-entrance guard)."
+Returns immediately if this propagator is already firing (re-entrance guard).
+Wraps output writes in a transaction to prevent glitches."
   (when (propagator-active-p propagator)
     (return-from fire-propagator))
   (setf (propagator-active-p propagator) t)
   (unwind-protect
-      (let* ((input-values (mapcar #'cell-value (propagator-inputs propagator)))
-             (result (apply (propagator-fn propagator) input-values))
-             (outputs (propagator-outputs propagator)))
-        (if (= (length outputs) 1)
-            (setf (cell-value (first outputs)) result)
-            (loop for cell in outputs
-                  for value in (if (listp result) result (list result))
-                  do (setf (cell-value cell) value))))
+      (with-transaction
+        (let* ((input-values (mapcar #'cell-value (propagator-inputs propagator)))
+               (result (apply (propagator-fn propagator) input-values))
+               (outputs (propagator-outputs propagator)))
+          (if (= (length outputs) 1)
+              (setf (cell-value (first outputs)) result)
+              (loop for cell in outputs
+                    for value in (if (listp result) result (list result))
+                    do (setf (cell-value cell) value)))))
     (setf (propagator-active-p propagator) nil)))
 
 (defun remove-propagator (propagator)

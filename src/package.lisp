@@ -88,7 +88,11 @@
    #:remove-propagator
    #:propagator-name
    #:propagator-inputs
-   #:propagator-outputs))
+   #:propagator-outputs
+   #:with-transaction
+   #:cell-height
+   #:cell-watcher
+   #:make-cell-watcher))
 
 (defpackage #:fluxion.render
   (:use #:cl #:fluxion.components)
@@ -168,7 +172,8 @@
    #:app-sessions
    #:push-event
    #:push-events
-   #:push-component-patch))
+   #:push-component-patch
+   #:parse-request-body))
 
 (defpackage #:fluxion
   (:use #:cl)
