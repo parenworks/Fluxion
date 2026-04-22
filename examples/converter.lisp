@@ -81,7 +81,7 @@
             (:label "Celsius")
             (:input :type "text"
                     :value (format-temp celsius)
-                    :data-on-change "/action/converter/set-celsius"
+                    :data-on-input "/action/converter/set-celsius"
                     :placeholder "Enter Celsius"))
           (:div :class "field-arrow"
             (:raw (format nil "&#8596;")))
@@ -89,7 +89,7 @@
             (:label "Fahrenheit")
             (:input :type "text"
                     :value (format-temp fahrenheit)
-                    :data-on-change "/action/converter/set-fahrenheit"
+                    :data-on-input "/action/converter/set-fahrenheit"
                     :placeholder "Enter Fahrenheit")))
         (:p :class "result"
             (format nil "~A C = ~A F" (format-temp celsius) (format-temp fahrenheit)))

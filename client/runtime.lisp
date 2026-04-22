@@ -70,11 +70,103 @@
           (fluxion-bind-actions (or (fluxion-qs selector)
                                     (@ el parent-element))))))
 
+    (defun fluxion-morph-nodes (old-node new-node)
+      "Recursively morph OLD-NODE to match NEW-NODE, preserving focus and input state."
+      (when (or (not old-node) (not new-node))
+        (return-from fluxion-morph-nodes))
+
+      ;; Different node types or different tag names - replace wholesale
+      (when (or (not (= (@ old-node node-type) (@ new-node node-type)))
+                (and (= (@ old-node node-type) 1)
+                     (not (string= (@ old-node tag-name) (@ new-node tag-name)))))
+        (chain (@ old-node parent-node) (replace-child new-node old-node))
+        (return-from fluxion-morph-nodes))
+
+      ;; Text or comment nodes - just update content
+      (when (or (= (@ old-node node-type) 3)
+                (= (@ old-node node-type) 8))
+        (when (not (string= (@ old-node node-value) (@ new-node node-value)))
+          (setf (@ old-node node-value) (@ new-node node-value)))
+        (return-from fluxion-morph-nodes))
+
+      ;; Element nodes - sync attributes, then children
+      (when (= (@ old-node node-type) 1)
+        (fluxion-sync-attrs old-node new-node)
+        (fluxion-morph-children old-node new-node)))
+
+    (defun fluxion-sync-attrs (old-el new-el)
+      "Synchronise attributes from NEW-EL onto OLD-EL.
+Skips the value attribute on the currently focused element to preserve user input."
+      (let ((is-focused (= old-el (@ document active-element)))
+            (old-attrs (create))
+            (i 0))
+        ;; Collect old attributes
+        (loop while (< i (@ old-el attributes length)) do
+          (let ((attr (aref (@ old-el attributes) i)))
+            (setf (getprop old-attrs (@ attr name)) (@ attr value)))
+          (incf i))
+        ;; Set/update attributes from new element
+        (setf i 0)
+        (loop while (< i (@ new-el attributes length)) do
+          (let ((attr (aref (@ new-el attributes) i)))
+            (let ((name (@ attr name))
+                  (val  (@ attr value)))
+              ;; Skip value on focused input to preserve cursor/selection
+              (unless (and is-focused (string= name "value"))
+                (when (not (string= (chain old-el (get-attribute name)) val))
+                  (chain old-el (set-attribute name val))))
+              (delete (getprop old-attrs name))))
+          (incf i))
+        ;; Remove attributes not in new element
+        (for-in (name old-attrs)
+          (when (chain old-attrs (has-own-property name))
+            (chain old-el (remove-attribute name))))))
+
+    (defun fluxion-morph-children (old-el new-el)
+      "Morph the child nodes of OLD-EL to match those of NEW-EL."
+      (let ((old-children (@ old-el child-nodes))
+            (new-children (@ new-el child-nodes))
+            (i 0))
+        ;; Walk through new children
+        (loop while (< i (@ new-children length)) do
+          (let ((new-child (aref new-children i)))
+            (if (< i (@ old-children length))
+                ;; Existing child - morph it
+                (let ((old-child (aref old-children i)))
+                  (if (and (= (@ old-child node-type) 1)
+                           (= (@ new-child node-type) 1)
+                           (string= (@ old-child tag-name) (@ new-child tag-name))
+                           (@ old-child id)
+                           (@ new-child id)
+                           (not (string= (@ old-child id) (@ new-child id))))
+                      ;; Different IDs on elements - replace, don't morph
+                      (chain old-el (replace-child (chain new-child (clone-node t)) old-child))
+                      ;; Same structure - recurse
+                      (fluxion-morph-nodes old-child new-child)))
+                ;; New child beyond old length - append
+                (chain old-el (append-child (chain new-child (clone-node t))))))
+          (incf i))
+        ;; Remove excess old children
+        (loop while (> (@ old-el child-nodes length) (@ new-children length)) do
+          (chain old-el (remove-child (@ old-el last-child))))))
+
     (defun fluxion-patch-morph (selector fragment)
       "Morph the element matching SELECTOR to match FRAGMENT.
-For v0.1 this is a simple outerHTML replacement.
-A proper morphing algorithm (idiomorph-style) can be added later."
-      (fluxion-patch-replace selector fragment))
+Diffs the DOM trees and only updates what changed, preserving
+focus, input values, and selection state on the active element."
+      (let ((old-el (fluxion-qs selector)))
+        (when old-el
+          ;; Parse the fragment into a temporary DOM node
+          (let ((template (chain document (create-element "template"))))
+            (setf (@ template inner-h-t-m-l) fragment)
+            (let ((new-el (@ template content first-element-child)))
+              (if new-el
+                  (progn
+                    (fluxion-morph-nodes old-el new-el)
+                    ;; Re-bind actions on new/changed content
+                    (fluxion-bind-actions old-el))
+                  ;; Fallback to replace if parsing fails
+                  (fluxion-patch-replace selector fragment)))))))
 
     (defun fluxion-patch-inner (selector fragment)
       "Replace the innerHTML of the element matching SELECTOR."

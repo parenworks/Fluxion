@@ -61,6 +61,7 @@
 
 (defpackage #:fluxion.cells
   (:use #:cl)
+  (:nicknames #:fluxion.lattice)
   (:export
    #:cell
    #:make-cell
