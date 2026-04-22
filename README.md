@@ -407,6 +407,27 @@ You can also batch multiple source cell changes into a single transaction:
 ;; Anything depending on both x and y recomputes once with both new values.
 ```
 
+### Thread Safety
+
+The cell graph is protected by a global recursive lock. All reads, writes, watcher registration, and transaction flushes are serialized automatically. You can safely write to cells from background threads (timers, monitors, WebSocket handlers) while the main thread reads them.
+
+```lisp
+;; This is safe from any thread:
+(setf (fluxion.cells:cell-value my-cell) new-value)
+
+;; Transactions hold the lock for their entire scope:
+(fluxion.cells:with-transaction
+  (setf (fluxion.cells:cell-value a) 1)
+  (setf (fluxion.cells:cell-value b) 2))
+
+;; For read-modify-write patterns, use with-cell-lock:
+(fluxion.cells:with-cell-lock
+  (let ((v (fluxion.cells:cell-value counter)))
+    (setf (fluxion.cells:cell-value counter) (1+ v))))
+```
+
+The lock is recursive, so watchers triggered during a write can safely read cells. The overhead is minimal for typical web app concurrency levels. If you need to observe consistent state across multiple cells, use a computed cell that depends on all of them - computed cells always see a consistent snapshot because transactions defer their recomputation until all sources are updated.
+
 ### Connecting cells to components
 
 ```lisp
@@ -538,7 +559,8 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment with Caddy, nginx, 
 - **v0.5** - Lattice: propagator-inspired reactive engine
 - **v0.6** - DOM morphing, defcomponent, persistent SSE server-push
 - **v0.7** - CSRF protection, test suite, authentication, routing, form validation
-- **v0.8** - glitch-free transactions, height-based topological scheduling (current)
+- **v0.8** - glitch-free transactions, height-based topological scheduling
+- **v0.9** - thread-safe cell graph, concurrent writer support (current)
 
 ## Licence
 

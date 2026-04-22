@@ -47,6 +47,7 @@
      (:file "test-cells")
      (:file "test-computed")
      (:file "test-transactions")
+     (:file "test-thread-safety")
      (:file "test-propagators")
      (:file "test-components")
      (:file "test-server")

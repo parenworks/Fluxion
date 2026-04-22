@@ -12,6 +12,25 @@
 (in-package #:fluxion.cells)
 
 ;;; -------------------------------------------------------
+;;; Thread safety
+;;; -------------------------------------------------------
+;;;
+;;; All mutations to the cell graph (setting values, adding/removing
+;;; watchers, recomputing, transaction flush) are serialized by a
+;;; single global lock. Reads also acquire the lock to ensure a
+;;; consistent snapshot of cell values. The lock is recursive so
+;;; that watchers triggered during a write can safely read cells.
+
+(defvar *cell-lock*
+  (bordeaux-threads:make-recursive-lock "fluxion-cell-lock")
+  "Global recursive lock protecting the cell graph.")
+
+(defmacro with-cell-lock (&body body)
+  "Execute BODY while holding the cell graph lock."
+  `(bordeaux-threads:with-recursive-lock-held (*cell-lock*)
+     ,@body))
+
+;;; -------------------------------------------------------
 ;;; Pending events (dynamic collection during action handling)
 ;;; -------------------------------------------------------
 
@@ -84,14 +103,16 @@ Cells may enqueue further cells during processing; loop until empty."
 (defmacro with-transaction (&body body)
   "Execute BODY within a transaction. All cell notifications are deferred
 and flushed in topological (height) order at the end, preventing glitches.
-Transactions nest: only the outermost transaction flushes."
+Transactions nest: only the outermost transaction flushes.
+Thread-safe: the outermost transaction holds the cell graph lock."
   (let ((outer (gensym "OUTER-")))
     `(let ((,outer *transaction*))
        (if ,outer
            (progn ,@body)
-           (let ((*transaction* (make-tx)))
-             (prog1 (progn ,@body)
-               (tx-flush *transaction*)))))))
+           (with-cell-lock
+             (let ((*transaction* (make-tx)))
+               (prog1 (progn ,@body)
+                 (tx-flush *transaction*))))))))
 
 ;;; -------------------------------------------------------
 ;;; Cell class
@@ -140,26 +161,30 @@ Used by computed cells to discover their dependencies.")
 
 (defun cell-value (cell)
   "Read the current value of CELL.
-When called inside a computed cell's thunk, records the read for dependency tracking."
-  (when *tracking-reads*
-    (pushnew cell (car *tracking-reads*)))
-  (slot-value cell 'value))
+When called inside a computed cell's thunk, records the read for dependency tracking.
+Thread-safe: acquires the cell graph lock."
+  (with-cell-lock
+    (when *tracking-reads*
+      (pushnew cell (car *tracking-reads*)))
+    (slot-value cell 'value)))
 
 (defun (setf cell-value) (new-value cell)
   "Set CELL to NEW-VALUE. Notifies watchers if the value changed.
-  Inside a transaction, downstream notifications are deferred."
-  (let ((old-value (slot-value cell 'value)))
-    (unless (funcall (cell-test cell) old-value new-value)
-      (setf (slot-value cell 'value) new-value)
-      (if *transaction*
-          ;; Defer: enqueue downstream dependents
-          (dolist (entry (cell-watchers cell))
-            (let ((target (watcher-target entry)))
-              (if target
-                  (tx-enqueue *transaction* target)
-                  ;; Non-cell watchers (e.g. component connectors) fire immediately
-                  (funcall (cell-watcher-fn entry) new-value old-value))))
-          (notify-watchers cell new-value old-value))))
+Inside a transaction, downstream notifications are deferred.
+Thread-safe: acquires the cell graph lock."
+  (with-cell-lock
+    (let ((old-value (slot-value cell 'value)))
+      (unless (funcall (cell-test cell) old-value new-value)
+        (setf (slot-value cell 'value) new-value)
+        (if *transaction*
+            ;; Defer: enqueue downstream dependents
+            (dolist (entry (cell-watchers cell))
+              (let ((target (watcher-target entry)))
+                (if target
+                    (tx-enqueue *transaction* target)
+                    ;; Non-cell watchers (e.g. component connectors) fire immediately
+                    (funcall (cell-watcher-fn entry) new-value old-value))))
+            (notify-watchers cell new-value old-value)))))
   new-value)
 
 ;;; -------------------------------------------------------
@@ -179,21 +204,25 @@ When called inside a computed cell's thunk, records the read for dependency trac
   "Register FN as a watcher on CELL.
 FN is called with (new-value old-value) whenever the cell changes.
 TARGET optionally references the downstream cell (for transaction scheduling).
+Thread-safe: acquires the cell graph lock.
 Returns the watcher entry."
-  (let ((entry (make-cell-watcher :fn fn :target target)))
-    (push entry (cell-watchers cell))
-    entry))
+  (with-cell-lock
+    (let ((entry (make-cell-watcher :fn fn :target target)))
+      (push entry (cell-watchers cell))
+      entry)))
 
 (defun unwatch (cell entry)
   "Remove a watcher ENTRY from CELL's watchers.
-ENTRY may be a cell-watcher struct or the original function."
-  (setf (cell-watchers cell)
-        (remove entry (cell-watchers cell)
-               :test (lambda (e w)
-                       (if (cell-watcher-p e)
-                           (eq e w)
-                           (and (cell-watcher-p w)
-                                (eq e (cell-watcher-fn w)))))))
+ENTRY may be a cell-watcher struct or the original function.
+Thread-safe: acquires the cell graph lock."
+  (with-cell-lock
+    (setf (cell-watchers cell)
+          (remove entry (cell-watchers cell)
+                 :test (lambda (e w)
+                         (if (cell-watcher-p e)
+                             (eq e w)
+                             (and (cell-watcher-p w)
+                                  (eq e (cell-watcher-fn w))))))))
   entry)
 
 (defun watcher-target (entry)

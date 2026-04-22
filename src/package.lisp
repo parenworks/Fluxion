@@ -92,7 +92,9 @@
    #:with-transaction
    #:cell-height
    #:cell-watcher
-   #:make-cell-watcher))
+   #:make-cell-watcher
+   #:*cell-lock*
+   #:with-cell-lock))
 
 (defpackage #:fluxion.render
   (:use #:cl #:fluxion.components)
@@ -251,6 +253,8 @@
    #:make-propagator
    #:fire-propagator
    #:remove-propagator
+   ;; Thread safety
+   #:with-cell-lock
    ;; Render
    #:render-to-string
    #:render-page

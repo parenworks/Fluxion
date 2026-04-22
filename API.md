@@ -151,6 +151,23 @@ Internals (not typically called directly):
 - `tx-enqueue (tx cell)` - add a cell to the deferred queue.
 - `tx-flush (tx)` - process the queue in height order until empty.
 
+### Thread Safety
+
+**`*cell-lock*`** - the global recursive lock protecting the cell graph. You rarely need to touch this directly.
+
+**`with-cell-lock (&body body)`** - macro. Execute `body` while holding the cell graph lock. Use this for read-modify-write patterns where you need atomicity across multiple cell operations that are not part of a transaction.
+
+```lisp
+;; Atomic increment
+(with-cell-lock
+  (let ((v (cell-value counter)))
+    (setf (cell-value counter) (1+ v))))
+```
+
+All cell operations (`cell-value`, `(setf cell-value)`, `watch`, `unwatch`) acquire the lock internally. `with-transaction` holds the lock for the entire transaction scope (outermost only). The lock is recursive, so watchers can safely read cells during notification.
+
+For observing consistent state across multiple cells, use a computed cell rather than reading cells individually - computed cells recompute inside the transaction after all sources are updated.
+
 ### Component Connection
 
 **`connect (cell component)`** - wire a cell to a component. When the cell's value changes, the component is automatically re-rendered and a patch event is collected. With `defcomponent`, cell-backed slots are connected automatically.
