@@ -5,8 +5,8 @@
 ;;;; when it changes.  This is the foundation for the reactive layer:
 ;;;;
 ;;;;   v0.3 - cells with watchers
-;;;;   v0.4 - computed cells with automatic dependency tracking (this file)
-;;;;   v0.5 - propagator network (general dependency graph)
+;;;;   v0.4 - computed cells with automatic dependency tracking
+;;;;   v0.5 - propagators (this file)
 
 (in-package #:fluxion.cells)
 
@@ -187,3 +187,90 @@ Discovers dependencies via *tracking-reads* and rewires watchers."
         (setf (slot-value computed 'value) new-value)
         (notify-watchers computed new-value old-value)))
     new-value))
+
+;;; -------------------------------------------------------
+;;; Propagators
+;;; -------------------------------------------------------
+;;; A propagator connects input cells to output cells via a function.
+;;; When any input changes, the function fires and writes results to
+;;; the outputs.  The cell equality check prevents infinite loops in
+;;; bidirectional networks - propagation stops when values converge.
+;;;
+;;; CL's exact rational arithmetic makes bidirectional numeric
+;;; propagators converge perfectly (no floating-point oscillation).
+
+(defclass propagator ()
+  ((name     :initarg :name
+             :accessor propagator-name
+             :initform nil
+             :documentation "Optional name for debugging.")
+   (inputs   :initarg :inputs
+             :accessor propagator-inputs
+             :documentation "List of input cells.")
+   (outputs  :initarg :outputs
+             :accessor propagator-outputs
+             :documentation "List of output cells.")
+   (fn       :initarg :fn
+             :accessor propagator-fn
+             :documentation "Function: receives input values as arguments, returns output value(s).")
+   (installed-watchers :initform nil
+                       :accessor propagator-installed-watchers
+                       :documentation "Watcher functions installed on input cells.")
+   (active-p :initform nil
+             :accessor propagator-active-p
+             :documentation "Re-entrance guard. Prevents direct cycles."))
+  (:documentation "A propagator connects input cells to output cells.
+When any input cell changes, the function is applied to all input values
+and the result(s) written to the output cell(s)."))
+
+(defun make-propagator (&key inputs fn outputs name)
+  "Create and activate a propagator.
+FN receives the current values of INPUTS as arguments.
+For a single output, FN returns one value.
+For multiple outputs, FN returns a list of values."
+  (let ((p (make-instance 'propagator
+                          :inputs inputs :fn fn :outputs outputs :name name)))
+    (install-propagator p)
+    (fire-propagator p)
+    p))
+
+(defmethod print-object ((p propagator) stream)
+  (print-unreadable-object (p stream :type t :identity t)
+    (when (propagator-name p)
+      (format stream "~A " (propagator-name p)))
+    (format stream "~D->~D"
+            (length (propagator-inputs p))
+            (length (propagator-outputs p)))))
+
+(defun install-propagator (propagator)
+  "Install watchers on all input cells so the propagator fires on change."
+  (let ((watcher (lambda (new-value old-value)
+                   (declare (ignore new-value old-value))
+                   (fire-propagator propagator))))
+    (dolist (input (propagator-inputs propagator))
+      (watch input watcher))
+    (setf (propagator-installed-watchers propagator) (list watcher))))
+
+(defun fire-propagator (propagator)
+  "Run the propagator: read inputs, apply function, write outputs.
+Returns immediately if this propagator is already firing (re-entrance guard)."
+  (when (propagator-active-p propagator)
+    (return-from fire-propagator))
+  (setf (propagator-active-p propagator) t)
+  (unwind-protect
+      (let* ((input-values (mapcar #'cell-value (propagator-inputs propagator)))
+             (result (apply (propagator-fn propagator) input-values))
+             (outputs (propagator-outputs propagator)))
+        (if (= (length outputs) 1)
+            (setf (cell-value (first outputs)) result)
+            (loop for cell in outputs
+                  for value in (if (listp result) result (list result))
+                  do (setf (cell-value cell) value))))
+    (setf (propagator-active-p propagator) nil)))
+
+(defun remove-propagator (propagator)
+  "Remove the propagator's watchers from its input cells."
+  (dolist (watcher (propagator-installed-watchers propagator))
+    (dolist (input (propagator-inputs propagator))
+      (unwatch input watcher)))
+  (setf (propagator-installed-watchers propagator) nil))

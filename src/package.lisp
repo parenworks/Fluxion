@@ -79,7 +79,14 @@
    #:computed-cell
    #:make-computed
    #:recompute
-   #:computed-dependencies))
+   #:computed-dependencies
+   #:propagator
+   #:make-propagator
+   #:fire-propagator
+   #:remove-propagator
+   #:propagator-name
+   #:propagator-inputs
+   #:propagator-outputs))
 
 (defpackage #:fluxion.render
   (:use #:cl #:fluxion.components)
@@ -166,6 +173,10 @@
    #:computed-cell
    #:make-computed
    #:recompute
+   #:propagator
+   #:make-propagator
+   #:fire-propagator
+   #:remove-propagator
    ;; Render
    #:render-to-string
    #:render-page

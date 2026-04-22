@@ -53,4 +53,5 @@
     :serial t
     :components
     ((:file "counter")
-     (:file "todo")))))
+     (:file "todo")
+     (:file "converter")))))
