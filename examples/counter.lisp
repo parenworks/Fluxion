@@ -112,9 +112,10 @@
 ;;; Page
 ;;; -------------------------------------------------------
 
-(defun render-counter-page (counter clock)
+(defun render-counter-page (counter clock &key csrf-token)
   (fluxion.render:render-page
    :title "Fluxion Counter Example"
+   :csrf-token csrf-token
    :body-html
    (concatenate 'string
     "<style>
@@ -170,7 +171,8 @@
             (clock   (fluxion.server:session-component session "server-clock")))
         (list 200
               '(:content-type "text/html")
-              (list (render-counter-page counter clock)))))
+              (list (render-counter-page counter clock
+                     :csrf-token (fluxion.server:session-csrf-token session))))))
     :port port)
 
   ;; Start the background clock ticker (server-push demo)

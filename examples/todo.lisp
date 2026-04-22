@@ -129,9 +129,10 @@
 ;;; Page
 ;;; -------------------------------------------------------
 
-(defun render-todo-page (todo-list)
+(defun render-todo-page (todo-list &key csrf-token)
   (fluxion.render:render-page
    :title "Fluxion Todo List"
+   :csrf-token csrf-token
    :body-html
    (concatenate 'string
     "<style>
@@ -194,7 +195,8 @@
       (let ((todo (fluxion.server:session-component session "todo-list")))
         (list 200
               '(:content-type "text/html")
-              (list (render-todo-page todo)))))
+              (list (render-todo-page todo
+                     :csrf-token (fluxion.server:session-csrf-token session))))))
     :port port)
 
   (format t "~%Fluxion todo example running at http://localhost:~D~%" port)

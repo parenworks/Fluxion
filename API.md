@@ -170,6 +170,12 @@ Propagators include a re-entrance guard to prevent infinite cycles in bidirectio
 
 **`session-components (session)`** - the hash table of all components in the session.
 
+**`session-csrf-token (session)`** - the session's CSRF token string. Pass this to `render-page` so the client can include it in POST requests.
+
+### CSRF Protection
+
+Every session gets a unique CSRF token on creation. The server rejects any POST request where the `X-CSRF-Token` header does not match the session's token (returns 403). The client runtime reads the token from a `<meta name="fluxion-csrf">` tag and sends it automatically.
+
 ### Server Push
 
 These functions push events to a session's persistent SSE connection (the `/sse` endpoint).
@@ -226,7 +232,15 @@ Low-level SSE formatting. Most users won't need these directly.
 
 ## Render (`fluxion.render`)
 
-**`render-page (&key title body-html head-html)`** - render a full HTML page with the Fluxion client runtime script tag included.
+**`render-page (&key title body-html head-html csrf-token script-path)`** - render a full HTML page with the Fluxion client runtime included.
+
+- `:title` - the page title.
+- `:body-html` - HTML string for the body.
+- `:head-html` - optional extra HTML for the head.
+- `:csrf-token` - session CSRF token. When provided, a `<meta name="fluxion-csrf" content="TOKEN">` tag is emitted in the head.
+- `:script-path` - path to fluxion.js (default `"/static/fluxion.js"`).
+
+**`csrf-meta-tag (token)`** - return an HTML meta tag string for the given CSRF token. Used internally by `render-page`, but available if you build pages manually.
 
 **`fluxion-script-tag ()`** - return the `<script>` tag that loads `/static/fluxion.js`.
 

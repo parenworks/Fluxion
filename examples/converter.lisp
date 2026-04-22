@@ -125,9 +125,10 @@
 ;;; Page
 ;;; -------------------------------------------------------
 
-(defun render-converter-page (converter)
+(defun render-converter-page (converter &key csrf-token)
   (fluxion.render:render-page
    :title "Fluxion Temperature Converter"
+   :csrf-token csrf-token
    :body-html
    (concatenate 'string
     "<style>
@@ -183,7 +184,8 @@
       (let ((converter (fluxion.server:session-component session "converter")))
         (list 200
               '(:content-type "text/html")
-              (list (render-converter-page converter)))))
+              (list (render-converter-page converter
+                     :csrf-token (fluxion.server:session-csrf-token session))))))
     :port port)
 
   (format t "~%Fluxion converter example running at http://localhost:~D~%" port)

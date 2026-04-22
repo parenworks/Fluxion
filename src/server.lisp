@@ -4,6 +4,14 @@
 (in-package #:fluxion.server)
 
 ;;; -------------------------------------------------------
+;;; CSRF token generation
+;;; -------------------------------------------------------
+
+(defun generate-csrf-token ()
+  "Generate a random CSRF token string (32 hex characters)."
+  (format nil "~(~32,'0X~)" (random (expt 2 128))))
+
+;;; -------------------------------------------------------
 ;;; Session
 ;;; -------------------------------------------------------
 
@@ -21,7 +29,11 @@
                      :documentation "Universal time of last request using this session.")
    (event-queue     :initform nil
                     :accessor session-event-queue
-                    :documentation "Event queue for persistent SSE push. Created on first /sse connect."))
+                    :documentation "Event queue for persistent SSE push. Created on first /sse connect.")
+   (csrf-token      :initform (generate-csrf-token)
+                    :accessor session-csrf-token
+                    :type string
+                    :documentation "Random token for CSRF protection. Validated on every POST."))
   (:documentation "A per-browser session holding its own component instances."))
 
 ;;; -------------------------------------------------------
@@ -352,6 +364,26 @@ Returns a Clack response or NIL if the path is not an action route."
 
 (alexandria:define-constant +session-cookie-name+ "fluxion-sid" :test #'equal)
 
+(defun get-csrf-header (env)
+  "Extract the X-CSRF-Token header from a Clack ENV."
+  (let ((headers (getf env :headers)))
+    (when headers
+      (gethash "x-csrf-token" headers))))
+
+(defun csrf-valid-p (session env)
+  "Return T if the CSRF token in the request matches the session's token."
+  (let ((request-token (get-csrf-header env))
+        (session-token (session-csrf-token session)))
+    (and request-token
+         session-token
+         (string= request-token session-token))))
+
+(defun csrf-rejection-response ()
+  "Return a 403 response for CSRF validation failure."
+  (list 403
+        '(:content-type "text/plain")
+        '("Forbidden: invalid or missing CSRF token")))
+
 (defun parse-cookies (env)
   "Parse the Cookie header from Clack ENV into an alist.
 Handles both Lack's :headers hash-table and raw :http-cookie plist key."
@@ -446,6 +478,11 @@ HTML page response."
                                 ;; Client disconnected
                                 nil))
                             (ignore-errors (funcall writer nil :close t))))))
+
+                     ;; All POST routes require a valid CSRF token
+                     ((and (eq method :post)
+                           (not (csrf-valid-p session env)))
+                      (csrf-rejection-response))
 
                      ;; CLOS component actions (POST /action/component-id/action-name)
                      ((and (eq method :post)

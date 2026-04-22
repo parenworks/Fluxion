@@ -29,6 +29,13 @@
     (defvar *fluxion-initialized* false)
     (defvar *fluxion-sse-reconnect-timer* nil)
 
+    (defun fluxion-get-csrf-token ()
+      "Read the CSRF token from the meta tag in the page head."
+      (let ((meta (chain document (query-selector "meta[name=fluxion-csrf]"))))
+        (if meta
+            (chain meta (get-attribute "content"))
+            nil)))
+
     ;;; ---------------------------------------------------
     ;;; DOM helpers
     ;;; ---------------------------------------------------
@@ -250,6 +257,9 @@ Parses the SSE response and dispatches events."
         (chain xhr (open "POST" url t))
         (chain xhr (set-request-header "Content-Type" "application/json"))
         (chain xhr (set-request-header "Accept" "text/event-stream"))
+        (let ((csrf (fluxion-get-csrf-token)))
+          (when csrf
+            (chain xhr (set-request-header "X-CSRF-Token" csrf))))
         (setf (@ xhr onreadystatechange)
               (lambda ()
                 (when (= (@ xhr ready-state) 4)

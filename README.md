@@ -142,13 +142,30 @@ Each browser gets its own session with its own component instances. Register a f
       (let ((c (fluxion.server:session-component session "counter")))
         (list 200
               '(:content-type "text/html")
-              (list (render-page c)))))))
+              (list (fluxion.render:render-page
+                     :title "My App"
+                     :csrf-token (fluxion.server:session-csrf-token session)
+                     :body-html (fluxion.components:render c))))))))
 ```
 
 Session options on `make-fluxion-app`:
 
 - **`:session-ttl 3600`** - seconds before idle sessions expire (default 1 hour).
 - **`:reaper-interval 60`** - how often the background reaper checks for expired sessions.
+
+## CSRF Protection
+
+Every session has a unique CSRF token. Pass it to `render-page` and it gets embedded in a `<meta>` tag. The client runtime reads the tag and includes the token as an `X-CSRF-Token` header on every POST request. The server validates the header before dispatching any action. Requests with a missing or wrong token get a 403 Forbidden response.
+
+```lisp
+;; In your page handler, pass the token to render-page:
+(fluxion.render:render-page
+ :title "My App"
+ :csrf-token (fluxion.server:session-csrf-token session)
+ :body-html (fluxion.components:render my-component))
+```
+
+This is automatic. Once you pass `:csrf-token`, the client handles the rest. No extra wiring needed.
 
 ## Server Push (Persistent SSE)
 
@@ -344,7 +361,8 @@ See [API.md](API.md) for the complete API reference covering all exported symbol
 - **v0.3** - reactive cells with watchers
 - **v0.4** - computed cells with automatic dependency tracking
 - **v0.5** - Lattice: propagator-inspired reactive engine
-- **v0.6** - DOM morphing, defcomponent, persistent SSE server-push (current)
+- **v0.6** - DOM morphing, defcomponent, persistent SSE server-push
+- **v0.7** - CSRF protection, test suite, authentication, routing (current)
 
 ## Licence
 

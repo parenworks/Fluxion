@@ -102,6 +102,52 @@
         (is (equal '(:a :b :c) events))))))
 
 ;;; -------------------------------------------------------
+;;; CSRF token tests
+;;; -------------------------------------------------------
+
+(test csrf-token-generated
+  "Sessions are created with a CSRF token."
+  (let ((s (make-instance 'fluxion.server:session :id "csrf-test")))
+    (is (stringp (fluxion.server:session-csrf-token s)))
+    (is (> (length (fluxion.server:session-csrf-token s)) 0))))
+
+(test csrf-token-unique
+  "Each session gets a unique CSRF token."
+  (let ((s1 (make-instance 'fluxion.server:session :id "a"))
+        (s2 (make-instance 'fluxion.server:session :id "b")))
+    (is (not (string= (fluxion.server:session-csrf-token s1)
+                       (fluxion.server:session-csrf-token s2))))))
+
+(test csrf-valid-p-matching
+  "csrf-valid-p returns T when header matches session token."
+  (let* ((s (make-instance 'fluxion.server:session :id "test"))
+         (token (fluxion.server:session-csrf-token s))
+         (headers (make-hash-table :test 'equal)))
+    (setf (gethash "x-csrf-token" headers) token)
+    (let ((env (list :headers headers)))
+      (is-true (fluxion.server::csrf-valid-p s env)))))
+
+(test csrf-valid-p-missing
+  "csrf-valid-p returns NIL when header is missing."
+  (let ((s (make-instance 'fluxion.server:session :id "test"))
+        (headers (make-hash-table :test 'equal)))
+    (let ((env (list :headers headers)))
+      (is-false (fluxion.server::csrf-valid-p s env)))))
+
+(test csrf-valid-p-wrong-token
+  "csrf-valid-p returns NIL when header has wrong token."
+  (let ((s (make-instance 'fluxion.server:session :id "test"))
+        (headers (make-hash-table :test 'equal)))
+    (setf (gethash "x-csrf-token" headers) "wrong-token")
+    (let ((env (list :headers headers)))
+      (is-false (fluxion.server::csrf-valid-p s env)))))
+
+(test csrf-rejection-response
+  "csrf-rejection-response returns 403."
+  (let ((resp (fluxion.server::csrf-rejection-response)))
+    (is (= 403 (first resp)))))
+
+;;; -------------------------------------------------------
 ;;; App creation
 ;;; -------------------------------------------------------
 

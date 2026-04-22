@@ -95,7 +95,8 @@
   (:export
    #:render-to-string
    #:render-page
-   #:fluxion-script-tag))
+   #:fluxion-script-tag
+   #:csrf-meta-tag))
 
 (defpackage #:fluxion.server
   (:use #:cl
@@ -122,6 +123,7 @@
    #:session-id
    #:session-component
    #:session-components
+   #:session-csrf-token
    #:app-handler
    #:app-session-lock
    #:app-sessions
@@ -156,6 +158,7 @@
    #:with-event-stream
    #:session
    #:session-component
+   #:session-csrf-token
    #:push-event
    #:push-events
    #:push-component-patch
@@ -194,6 +197,7 @@
    #:render-to-string
    #:render-page
    #:fluxion-script-tag
+   #:csrf-meta-tag
    ;; Protocol
    #:format-sse-event
    #:write-sse-event))
