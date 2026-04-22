@@ -762,27 +762,31 @@ HTML page response."
                      ((and (eq method :get)
                            (string= path "/sse"))
                       (let ((queue (ensure-event-queue session)))
-                        ;; Return a streaming callback for Clack
-                        ;; The responder (handle-normal-response) returns a writer
-                        ;; function when called without a body.
+                        ;; Return a streaming callback for Clack.
+                        ;; The blocking event loop runs in a dedicated thread
+                        ;; so it works with both thread-per-connection servers
+                        ;; (Hunchentoot) and event-loop servers (Woo).
                         (lambda (responder)
                           (let ((writer (funcall responder
                                           '(200 (:content-type "text/event-stream"
                                                  :cache-control "no-cache"
                                                  :x-accel-buffering "no")))))
-                            (handler-case
-                                (loop until (eq-closed-p queue) do
-                                  (let ((events (dequeue-all-events queue :timeout 15)))
-                                    (if events
-                                        (dolist (event events)
-                                          (funcall writer (format-sse-event event)))
-                                        ;; Keep-alive comment
-                                        (funcall writer
-                                                 (format nil ": keepalive~%~%")))))
-                              (error ()
-                                ;; Client disconnected
-                                nil))
-                            (ignore-errors (funcall writer nil :close t))))))
+                            (bt:make-thread
+                             (lambda ()
+                               (handler-case
+                                   (loop until (eq-closed-p queue) do
+                                     (let ((events (dequeue-all-events queue :timeout 15)))
+                                       (if events
+                                           (dolist (event events)
+                                             (funcall writer (format-sse-event event)))
+                                           ;; Keep-alive comment
+                                           (funcall writer
+                                                    (format nil ": keepalive~%~%")))))
+                                 (error ()
+                                   ;; Client disconnected
+                                   nil))
+                               (ignore-errors (funcall writer nil :close t)))
+                             :name "fluxion-sse-writer")))))
 
                      ;; All POST routes require a valid CSRF token
                      ((and (eq method :post)

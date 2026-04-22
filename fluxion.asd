@@ -82,4 +82,5 @@
     :components
     ((:file "counter")
      (:file "todo")
-     (:file "converter")))))
+     (:file "converter")
+     (:file "colour-picker")))))
