@@ -65,7 +65,7 @@
    (sessions   :initform (make-hash-table :test 'equal)
                :accessor app-sessions
                :documentation "Session store, keyed by session-id string.")
-   (session-lock :initform (bordeaux-threads:make-lock "fluxion-session-lock")
+   (session-lock :initform (bt:make-lock "fluxion-session-lock")
                  :accessor app-session-lock)
    (session-ttl :initarg :session-ttl
                 :accessor app-session-ttl
@@ -300,7 +300,7 @@ Handles both Lack's :headers hash-table and raw :http-cookie plist key."
   "Return (values session is-new-p). Creates a new session if needed.
 Ensures per-session component instances are created from factories."
   (let ((sid (get-session-id-from-env env)))
-    (bordeaux-threads:with-lock-held ((app-session-lock app))
+    (bt:with-lock-held ((app-session-lock app))
       (let ((existing (and sid (gethash sid (app-sessions app)))))
         (if existing
             (progn
@@ -421,7 +421,7 @@ HTML page response."
   "Remove expired sessions from APP. Returns the number of sessions reaped."
   (let ((ttl (app-session-ttl app))
         (reaped 0))
-    (bordeaux-threads:with-lock-held ((app-session-lock app))
+    (bt:with-lock-held ((app-session-lock app))
       (let ((to-remove nil))
         (maphash (lambda (sid session)
                    (when (session-expired-p session ttl)
@@ -436,7 +436,7 @@ HTML page response."
   "Start the background session reaper thread for APP."
   (stop-session-reaper app)
   (setf (app-reaper-thread app)
-        (bordeaux-threads:make-thread
+        (bt:make-thread
          (lambda ()
            (loop
              (sleep (app-reaper-interval app))
@@ -450,6 +450,6 @@ HTML page response."
 (defun stop-session-reaper (app)
   "Stop the background session reaper thread for APP."
   (when (and (app-reaper-thread app)
-             (bordeaux-threads:thread-alive-p (app-reaper-thread app)))
-    (bordeaux-threads:destroy-thread (app-reaper-thread app)))
+             (bt:thread-alive-p (app-reaper-thread app)))
+    (bt:destroy-thread (app-reaper-thread app)))
   (setf (app-reaper-thread app) nil))

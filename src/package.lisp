@@ -73,6 +73,7 @@
         #:fluxion.signals
         #:fluxion.components
         #:fluxion.render)
+  (:local-nicknames (#:bt #:bordeaux-threads))
   (:export
    #:fluxion-app
    #:make-fluxion-app
