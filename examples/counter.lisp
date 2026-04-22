@@ -5,6 +5,7 @@
 ;;;;   - Defining a CLOS component
 ;;;;   - Rendering with Spinneret
 ;;;;   - Reactive cells (auto-patching on state change)
+;;;;   - Computed cells (auto-derived values)
 ;;;;   - Handling actions via defaction
 ;;;;
 ;;;; Usage:
@@ -25,13 +26,26 @@
 
 (defclass counter (fluxion.components:component)
   ((count :accessor counter-count-cell
-          :documentation "A reactive cell holding the count value."))
+          :documentation "A reactive cell holding the count value.")
+   (label :accessor counter-label-cell
+          :documentation "A computed cell deriving a display label from count."))
   (:default-initargs :id "counter"))
 
 (defmethod initialize-instance :after ((c counter) &key)
   (setf (counter-count-cell c) (fluxion.cells:make-cell 0 :name "count"))
-  ;; Connect the cell to this component - changes auto-patch
-  (fluxion.cells:connect (counter-count-cell c) c))
+  ;; Computed cell: derives a label from the count, auto-tracks dependency
+  (setf (counter-label-cell c)
+        (fluxion.cells:make-computed
+         (let ((cell (counter-count-cell c)))
+           (lambda ()
+             (let ((n (fluxion.cells:cell-value cell)))
+               (format nil "Count: ~D~A" n
+                       (cond ((zerop n) " (zero)")
+                             ((plusp n) " (positive)")
+                             (t         " (negative)"))))))
+         :name "label"))
+  ;; Connect the computed label to the component - changes auto-patch
+  (fluxion.cells:connect (counter-label-cell c) c))
 
 (defun counter-count (counter)
   "Read the counter's current count."
@@ -41,13 +55,17 @@
   "Set the counter's count. Triggers auto-patch via the cell."
   (setf (fluxion.cells:cell-value (counter-count-cell counter)) value))
 
+(defun counter-label (counter)
+  "Read the derived label (computed from count)."
+  (fluxion.cells:cell-value (counter-label-cell counter)))
+
 (defmethod fluxion.components:render ((c counter))
   (spinneret:with-html-string
     (:div :id (fluxion.components:component-id c)
           :class "counter-component"
       (:h2 "Counter")
       (:p :class "count-display"
-          (format nil "Count: ~D" (counter-count c)))
+          (counter-label c))
       (:div :class "counter-buttons"
         (:button :data-on-click "/action/counter/increment" "Increment")
         (:button :data-on-click "/action/counter/decrement" "Decrement")

@@ -4,8 +4,8 @@
 ;;;; A cell is a container for a single value that notifies watchers
 ;;;; when it changes.  This is the foundation for the reactive layer:
 ;;;;
-;;;;   v0.3 - cells with watchers (this file)
-;;;;   v0.4 - computed cells (auto-derived values)
+;;;;   v0.3 - cells with watchers
+;;;;   v0.4 - computed cells with automatic dependency tracking (this file)
 ;;;;   v0.5 - propagator network (general dependency graph)
 
 (in-package #:fluxion.cells)
@@ -73,8 +73,15 @@ Returns them in the order they were collected."
 ;;; Reading and writing
 ;;; -------------------------------------------------------
 
+(defvar *tracking-reads* nil
+  "When bound to a list, cell reads are recorded here for dependency tracking.
+Used by computed cells to discover their dependencies.")
+
 (defun cell-value (cell)
-  "Read the current value of CELL."
+  "Read the current value of CELL.
+When called inside a computed cell's thunk, records the read for dependency tracking."
+  (when *tracking-reads*
+    (pushnew cell (car *tracking-reads*)))
   (slot-value cell 'value))
 
 (defun (setf cell-value) (new-value cell)
@@ -126,3 +133,57 @@ Returns the watcher function (useful for later disconnection)."
 (defun disconnect (cell watcher)
   "Remove a previously connected watcher from CELL."
   (unwatch cell watcher))
+
+;;; -------------------------------------------------------
+;;; Computed cells
+;;; -------------------------------------------------------
+
+(defclass computed-cell (cell)
+  ((thunk        :initarg :thunk
+                 :accessor computed-thunk
+                 :documentation "Zero-argument function that computes the value.")
+   (dependencies :initform nil
+                 :accessor computed-dependencies
+                 :documentation "List of cells this computed depends on.")
+   (update-fn    :initform nil
+                 :accessor computed-update-fn
+                 :documentation "The watcher function installed on dependencies."))
+  (:documentation "A cell whose value is derived from other cells.
+The thunk is re-run whenever a dependency changes, and watchers on
+this cell are notified if the computed value changes."))
+
+(defun make-computed (thunk &key name (test #'equal))
+  "Create a computed cell. THUNK is a zero-argument function that reads
+other cells to produce a value. Dependencies are tracked automatically."
+  (let ((c (make-instance 'computed-cell :thunk thunk :name name :test test)))
+    (recompute c)
+    c))
+
+(defun recompute (computed)
+  "Recalculate COMPUTED's value by running its thunk.
+Discovers dependencies via *tracking-reads* and rewires watchers."
+  (let* ((*tracking-reads* (list nil))
+         (new-value (funcall (computed-thunk computed)))
+         (new-deps (car *tracking-reads*))
+         (old-deps (computed-dependencies computed)))
+    ;; Unwire old dependencies that are no longer read
+    (let ((update-fn (or (computed-update-fn computed)
+                         (let ((fn (lambda (nv ov)
+                                     (declare (ignore nv ov))
+                                     (recompute computed))))
+                           (setf (computed-update-fn computed) fn)
+                           fn))))
+      (dolist (dep old-deps)
+        (unless (member dep new-deps)
+          (unwatch dep update-fn)))
+      ;; Wire new dependencies
+      (dolist (dep new-deps)
+        (unless (member dep old-deps)
+          (watch dep update-fn)))
+      (setf (computed-dependencies computed) new-deps))
+    ;; Update the value and notify watchers if changed
+    (let ((old-value (slot-value computed 'value)))
+      (unless (funcall (cell-test computed) old-value new-value)
+        (setf (slot-value computed 'value) new-value)
+        (notify-watchers computed new-value old-value)))
+    new-value))

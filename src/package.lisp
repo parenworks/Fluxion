@@ -75,7 +75,11 @@
    #:*pending-events*
    #:collect-event
    #:collect-events
-   #:drain-pending-events))
+   #:drain-pending-events
+   #:computed-cell
+   #:make-computed
+   #:recompute
+   #:computed-dependencies))
 
 (defpackage #:fluxion.render
   (:use #:cl #:fluxion.components)
@@ -159,6 +163,9 @@
    #:unwatch
    #:connect
    #:disconnect
+   #:computed-cell
+   #:make-computed
+   #:recompute
    ;; Render
    #:render-to-string
    #:render-page
