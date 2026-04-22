@@ -98,6 +98,31 @@
    #:fluxion-script-tag
    #:csrf-meta-tag))
 
+(defpackage #:fluxion.validation
+  (:use #:cl)
+  (:export
+   #:validation-result
+   #:make-validation-result
+   #:add-error
+   #:field-error
+   #:valid-p
+   #:errors-alist
+   #:errors-plist
+   #:validate
+   #:validation-error-events
+   #:clear-error-events
+   ;; Built-in validators
+   #:required
+   #:min-length
+   #:max-length
+   #:matches-pattern
+   #:email
+   #:integer-string
+   #:number-string
+   #:one-of
+   #:predicate
+   #:confirmed))
+
 (defpackage #:fluxion.server
   (:use #:cl
         #:fluxion.protocol
@@ -228,4 +253,11 @@
    #:csrf-meta-tag
    ;; Protocol
    #:format-sse-event
-   #:write-sse-event))
+   #:write-sse-event
+   ;; Validation
+   #:validate
+   #:valid-p
+   #:field-error
+   #:errors-alist
+   #:validation-error-events
+   #:clear-error-events))

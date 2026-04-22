@@ -14,7 +14,8 @@
                "cl-json"
                "babel"
                "bordeaux-threads"
-               "hunchentoot")
+               "hunchentoot"
+               "cl-ppcre")
   :serial t
   :components
   ((:module "src"
@@ -27,6 +28,7 @@
      (:file "components")
      (:file "cells")
      (:file "render")
+     (:file "validation")
      (:file "server")))))
 
 (defsystem "fluxion/tests"
@@ -47,7 +49,8 @@
      (:file "test-propagators")
      (:file "test-components")
      (:file "test-server")
-     (:file "test-router")))))
+     (:file "test-router")
+     (:file "test-validation")))))
 
 (defsystem "fluxion/client"
   :name "fluxion-client"

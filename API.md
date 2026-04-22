@@ -294,6 +294,75 @@ Low-level SSE formatting. Most users won't need these directly.
 
 ---
 
+## Validation (`fluxion.validation`)
+
+Server-side form validation with SSE error feedback.
+
+### Validation Result
+
+**`validation-result`** - class holding field errors from a validation run.
+
+**`make-validation-result ()`** - create an empty result.
+
+**`add-error (result field message)`** - add an error message for a field. Only the first error per field is kept.
+
+**`field-error (result field)`** - return the error message for a field, or NIL if valid.
+
+**`valid-p (result)`** - return T if the result has no errors.
+
+**`errors-alist (result)`** - return errors as `((field . message) ...)`.
+
+**`errors-plist (result)`** - return errors as `(:field message ...)`.
+
+### Validate
+
+**`validate (params rules)`** - run validation rules against a params alist. Returns a `validation-result`.
+
+`params` is an alist of `(field-string . value-string)` pairs (the format Fluxion action handlers receive).
+
+`rules` is a list of `(field-name validator1 validator2 ...)` lists. Validators are called in order; the first failure stops validation for that field.
+
+```lisp
+(validate params
+  (list (list "username" (required) (min-length 3))
+        (list "email"    (required) (email))))
+```
+
+### Built-in Validators
+
+Each returns a closure suitable for passing to `validate`. All accept an optional custom error message as their last argument.
+
+**`required (&optional message)`** - field must be present and non-empty.
+
+**`min-length (n &optional message)`** - string must be at least N characters.
+
+**`max-length (n &optional message)`** - string must be at most N characters.
+
+**`matches-pattern (regex &optional message)`** - string must match a CL-PPCRE regex.
+
+**`email (&optional message)`** - value must look like an email address.
+
+**`integer-string (&optional message)`** - value must parse as an integer.
+
+**`number-string (&optional message)`** - value must parse as a number.
+
+**`one-of (choices &optional message)`** - value must be one of the strings in `choices`.
+
+**`predicate (fn &optional message)`** - custom predicate. `fn` takes a value and returns T if valid.
+
+**`confirmed (params confirm-field &optional message)`** - value must match the value of another field. Useful for password confirmation.
+
+### Error Feedback
+
+**`validation-error-events (result &key selector-fn class)`** - generate SSE patch events for each errored field. Returns a list of events suitable for returning from an action handler.
+
+- `:selector-fn` - function `(field-name) -> CSS-selector`. Default: `"#error-{field}"`.
+- `:class` - CSS class for the error span (default `"field-error"`).
+
+**`clear-error-events (fields &key selector-fn)`** - generate SSE patch events to clear error messages for the given field name strings.
+
+---
+
 ## Client (`fluxion.client`)
 
 **`build-client (&key output-path)`** - compile the Parenscript runtime to JavaScript and write it to `output-path` (defaults to `static/fluxion.js`).

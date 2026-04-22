@@ -43,6 +43,10 @@
   :description "Path-based routing."
   :in fluxion-suite)
 
+(def-suite validation-suite
+  :description "Form validation helpers."
+  :in fluxion-suite)
+
 (defun run-all-tests ()
   "Run the full Fluxion test suite. Returns T if all tests pass."
   (run! 'fluxion-suite))

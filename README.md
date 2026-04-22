@@ -418,6 +418,38 @@ Action responses (POST to `/action/...`) return these events in the response bod
 | `data-bind="signal-name"` | Two-way bind input value to a client-side signal |
 | `data-text="$signal-name"` | Display signal value as text content |
 
+## Form Validation
+
+Fluxion includes server-side form validation with automatic error feedback via SSE.
+
+```lisp
+(fluxion.components:defaction signup-form :submit (c params)
+  (let ((result (fluxion.validation:validate params
+                  (list (list "username" (fluxion.validation:required)
+                                         (fluxion.validation:min-length 3))
+                        (list "email"    (fluxion.validation:required)
+                                         (fluxion.validation:email))
+                        (list "password" (fluxion.validation:required)
+                                         (fluxion.validation:min-length 8))))))
+    (if (fluxion.validation:valid-p result)
+        (progn
+          ;; Process the valid form...
+          nil)
+        ;; Send error patches to the DOM
+        (fluxion.validation:validation-error-events result))))
+```
+
+In your HTML, place empty error spans next to each field:
+
+```html
+<input name="username" data-on-change="/action/signup/submit" />
+<span id="error-username"></span>
+```
+
+The default selector pattern is `#error-{field-name}`. Pass `:selector-fn` to `validation-error-events` to customise it.
+
+Built-in validators: `required`, `min-length`, `max-length`, `matches-pattern`, `email`, `integer-string`, `number-string`, `one-of`, `predicate`, `confirmed`. All accept an optional custom error message as their last argument.
+
 ## Error Handling
 
 Server-side action errors are caught and sent back as `fluxion-script` events that display an error toast in the browser. The toast auto-dismisses after 8 seconds. You can trigger one manually from server code:
@@ -450,6 +482,7 @@ See [API.md](API.md) for the complete API reference covering all exported symbol
 - [Parenscript](https://common-lisp.net/project/parenscript/) - Lisp-to-JavaScript compiler
 - [Babel](https://github.com/cl-babel/babel) - charset encoding
 - [Bordeaux Threads](https://sionescu.github.io/bordeaux-threads/) - threading
+- [CL-PPCRE](https://edicl.github.io/cl-ppcre/) - regular expressions (for validation)
 
 ## Roadmap
 
@@ -459,7 +492,7 @@ See [API.md](API.md) for the complete API reference covering all exported symbol
 - **v0.4** - computed cells with automatic dependency tracking
 - **v0.5** - Lattice: propagator-inspired reactive engine
 - **v0.6** - DOM morphing, defcomponent, persistent SSE server-push
-- **v0.7** - CSRF protection, test suite, authentication, routing (current)
+- **v0.7** - CSRF protection, test suite, authentication, routing, form validation (current)
 
 ## Licence
 
