@@ -771,22 +771,24 @@ HTML page response."
                                           '(200 (:content-type "text/event-stream"
                                                  :cache-control "no-cache"
                                                  :x-accel-buffering "no")))))
-                            (bt:make-thread
-                             (lambda ()
-                               (handler-case
-                                   (loop until (eq-closed-p queue) do
-                                     (let ((events (dequeue-all-events queue :timeout 15)))
-                                       (if events
-                                           (dolist (event events)
-                                             (funcall writer (format-sse-event event)))
-                                           ;; Keep-alive comment
-                                           (funcall writer
-                                                    (format nil ": keepalive~%~%")))))
-                                 (error ()
-                                   ;; Client disconnected
-                                   nil))
-                               (ignore-errors (funcall writer nil :close t)))
-                             :name "fluxion-sse-writer")))))
+                            ;; Write SSE events directly in this thread.
+                            ;; The callback blocks for the lifetime of the
+                            ;; connection.  Woo's writer is not thread-safe,
+                            ;; so all writes must happen in the callback thread.
+                            (unwind-protect
+                                 (handler-case
+                                     (loop until (eq-closed-p queue) do
+                                       (let ((events (dequeue-all-events queue :timeout 15)))
+                                         (if events
+                                             (dolist (event events)
+                                               (funcall writer (format-sse-event event)))
+                                             ;; Keep-alive comment
+                                             (funcall writer
+                                                      (format nil ": keepalive~%~%")))))
+                                   (error ()
+                                     ;; Client disconnected
+                                     nil))
+                              (ignore-errors (funcall writer nil :close t)))))))
 
                      ;; All POST routes require a valid CSRF token
                      ((and (eq method :post)
