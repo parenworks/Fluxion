@@ -169,18 +169,22 @@ Skips the value attribute on the currently focused element to preserve user inpu
 Diffs the DOM trees and only updates what changed, preserving
 focus, input values, and selection state on the active element."
       (let ((old-el (fluxion-qs selector)))
-        (when old-el
-          ;; Parse the fragment into a temporary DOM node
-          (let ((template (chain document (create-element "template"))))
-            (setf (@ template inner-h-t-m-l) fragment)
-            (let ((new-el (@ template content first-element-child)))
-              (if new-el
-                  (progn
-                    (fluxion-morph-nodes old-el new-el)
-                    ;; Re-bind actions on new/changed content
-                    (fluxion-bind-actions old-el))
-                  ;; Fallback to replace if parsing fails
-                  (fluxion-patch-replace selector fragment)))))))
+        (if old-el
+            ;; Parse the fragment into a temporary DOM node
+            (let ((template (chain document (create-element "template"))))
+              (setf (@ template inner-h-t-m-l) fragment)
+              (let ((new-el (@ template content first-element-child)))
+                (if new-el
+                    (progn
+                      (chain console (log "Fluxion morph:" selector
+                                          "old-children=" (@ old-el child-nodes length)
+                                          "new-children=" (@ new-el child-nodes length)))
+                      (fluxion-morph-nodes old-el new-el)
+                      ;; Re-bind actions on new/changed content
+                      (fluxion-bind-actions old-el))
+                    ;; Fallback to replace if parsing fails
+                    (fluxion-patch-replace selector fragment))))
+            (chain console (log "Fluxion morph: element not found:" selector)))))
 
     (defun fluxion-patch-inner (selector fragment)
       "Replace the innerHTML of the element matching SELECTOR."
@@ -255,10 +259,11 @@ focus, input values, and selection state on the active element."
     ;;; SSE connection
     ;;; ---------------------------------------------------
 
-    (defun fluxion-post (url &optional body callback)
+    (defun fluxion-post (url &optional body callback retried)
       "Send a POST request to URL with optional JSON BODY.
 The response is expected to be text/event-stream (SSE).
-Parses the SSE response and dispatches events."
+Parses the SSE response and dispatches events.
+Retries once on network error (status 0) from stale keep-alive."
       (let ((xhr (new (-x-m-l-http-request))))
         (chain xhr (open "POST" url t))
         (chain xhr (set-request-header "Content-Type" "application/json"))
@@ -269,13 +274,18 @@ Parses the SSE response and dispatches events."
         (setf (@ xhr onreadystatechange)
               (lambda ()
                 (when (= (@ xhr ready-state) 4)
-                  (if (= (@ xhr status) 200)
-                      (progn
-                        (fluxion-parse-sse-response (@ xhr response-text))
-                        (when callback
-                          (funcall callback)))
-                      (fluxion-show-error
-                       (+ "Request failed (" (@ xhr status) "): " url))))))
+                  (cond
+                    ((= (@ xhr status) 200)
+                     (fluxion-parse-sse-response (@ xhr response-text))
+                     (when callback
+                       (funcall callback)))
+                    ;; Status 0 = network error, retry once (stale keep-alive)
+                    ((and (= (@ xhr status) 0) (not retried))
+                     (chain console (log "Fluxion: retrying POST" url))
+                     (fluxion-post url body callback t))
+                    (t
+                     (fluxion-show-error
+                      (+ "Request failed (" (@ xhr status) "): " url)))))))
         (chain xhr (send (if body
                              (chain -j-s-o-n (stringify body))
                              "")))))
@@ -354,52 +364,50 @@ ROOT defaults to document."
           (chain click-els (for-each
                             (lambda (el)
                               (unless (@ el _fluxion-click-bound)
-                                (let ((action-url (chain el (get-attribute "data-on-click"))))
-                                  (chain el (add-event-listener "click"
-                                                                (lambda (e)
-                                                                  (chain e (prevent-default))
-                                                                  (let ((confirm-msg (chain el (get-attribute "data-confirm"))))
-                                                                    (when (or (not confirm-msg)
-                                                                              (chain window (confirm confirm-msg)))
-                                                                      (fluxion-post action-url
-                                                                                    (fluxion-merge-body el)))))))
-                                  (setf (@ el _fluxion-click-bound) t)))))))
+                                (chain el (add-event-listener "click"
+                                                              (lambda (e)
+                                                                (chain e (prevent-default))
+                                                                (let ((action-url (chain el (get-attribute "data-on-click")))
+                                                                      (confirm-msg (chain el (get-attribute "data-confirm"))))
+                                                                  (when (or (not confirm-msg)
+                                                                            (chain window (confirm confirm-msg)))
+                                                                    (fluxion-post action-url
+                                                                                  (fluxion-merge-body el)))))))
+                                (setf (@ el _fluxion-click-bound) t))))))
 
         ;; data-on-submit=\"/path\"
         (let ((submit-els (chain root (query-selector-all "[data-on-submit]"))))
           (chain submit-els (for-each
                              (lambda (el)
                                (unless (@ el _fluxion-submit-bound)
-                                 (let ((action-url (chain el (get-attribute "data-on-submit"))))
-                                   (chain el (add-event-listener "submit"
-                                                                 (lambda (e)
-                                                                   (chain e (prevent-default))
-                                                                   ;; Collect form data as signals
-                                                                   (let ((form-data (new (-form-data el))))
-                                                                     (chain form-data (for-each
-                                                                                       (lambda (value key)
-                                                                                         (fluxion-set-signal key value))))
-                                                                     (fluxion-post action-url
-                                                                                   (fluxion-merge-body el))))))
-                                   (setf (@ el _fluxion-submit-bound) t)))))))
+                                 (chain el (add-event-listener "submit"
+                                                               (lambda (e)
+                                                                 (chain e (prevent-default))
+                                                                 (let ((action-url (chain el (get-attribute "data-on-submit")))
+                                                                       (form-data (new (-form-data el))))
+                                                                   (chain form-data (for-each
+                                                                                     (lambda (value key)
+                                                                                       (fluxion-set-signal key value))))
+                                                                   (fluxion-post action-url
+                                                                                 (fluxion-merge-body el))))))
+                                 (setf (@ el _fluxion-submit-bound) t))))))
 
         ;; data-on-change=\"/path\" - for checkboxes, selects, radio buttons
         (let ((change-els (chain root (query-selector-all "[data-on-change]"))))
           (chain change-els (for-each
                              (lambda (el)
                                (unless (@ el _fluxion-change-bound)
-                                 (let ((action-url (chain el (get-attribute "data-on-change"))))
-                                   (chain el (add-event-listener "change"
-                                                                 (lambda (e)
-                                                                   (chain e (prevent-default))
-                                                                   ;; Include element value/checked state
-                                                                   (let ((body (fluxion-merge-body el)))
-                                                                     (if (string= (@ el type) "checkbox")
-                                                                         (setf (getprop body "checked")
-                                                                               (if (@ el checked) "true" "false"))
-                                                                         (setf (getprop body "value") (@ el value)))
-                                                                     (fluxion-post action-url body)))))
-                                   (setf (@ el _fluxion-change-bound) t)))))))
+                                 (chain el (add-event-listener "change"
+                                                               (lambda (e)
+                                                                 (chain e (prevent-default))
+                                                                 (let ((action-url (chain el (get-attribute "data-on-change")))
+                                                                       (body (fluxion-merge-body el)))
+                                                                   (if (string= (@ el type) "checkbox")
+                                                                       (setf (getprop body "checked")
+                                                                             (if (@ el checked) "true" "false"))
+                                                                       (setf (getprop body "value") (@ el value)))
+                                                                   (fluxion-post action-url body)))))
+                                 (setf (@ el _fluxion-change-bound) t))))))
 
         ;; data-on-keydown=\"/path\" with optional data-key=\"Enter\" filter
         (let ((keydown-els (chain root (query-selector-all "[data-on-keydown]"))))
@@ -597,7 +605,9 @@ Uses exponential backoff with jitter on connection failure."
         ;; Register handlers for each Fluxion event type
         (chain source (add-event-listener "fluxion-patch"
                         (lambda (e)
-                          (fluxion-handle-patch (chain -j-s-o-n (parse (@ e data)))))))
+                          (let ((data (chain -j-s-o-n (parse (@ e data)))))
+                            (chain console (log "Fluxion SSE: received patch for" (@ data selector)))
+                            (fluxion-handle-patch data)))))
         (chain source (add-event-listener "fluxion-remove"
                         (lambda (e)
                           (fluxion-handle-remove (chain -j-s-o-n (parse (@ e data)))))))

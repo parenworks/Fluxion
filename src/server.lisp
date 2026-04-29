@@ -781,6 +781,9 @@ HTML page response."
                                        (let ((events (dequeue-all-events queue :timeout 15)))
                                          (if events
                                              (dolist (event events)
+                                               (format t "[Fluxion SSE] Writing event type=~a~%"
+                                                       (fluxion.protocol:event-type event))
+                                               (force-output)
                                                (funcall writer (format-sse-event event)))
                                              ;; Keep-alive comment
                                              (funcall writer
