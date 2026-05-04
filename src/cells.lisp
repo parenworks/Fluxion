@@ -72,6 +72,31 @@ Returns them in the order they were collected."
 ;;;   all update before any cell at a higher level is recomputed.
 ;;; - Each cell is recomputed at most once per transaction (deduplication).
 
+;;; -------------------------------------------------------
+;;; Convergence safety
+;;; -------------------------------------------------------
+;;;
+;;; A propagator cycle whose fixed point is irrational (e.g. Newton's
+;;; method for sqrt(2)) will never converge with exact rational
+;;; arithmetic, causing tx-flush to loop forever while numerators and
+;;; denominators grow exponentially.  Three defences:
+;;;
+;;;   1. *max-propagation-rounds* - hard iteration cap on tx-flush.
+;;;   2. Cell :test keyword - custom approximate equality (already in API).
+;;;   3. rational-too-large-p - detects runaway rational growth.
+
+(define-condition propagation-limit-exceeded (error)
+  ((rounds    :initarg :rounds    :reader propagation-limit-rounds)
+   (remaining :initarg :remaining :reader propagation-limit-remaining))
+  (:report (lambda (c s)
+             (format s "Propagation did not converge after ~D rounds (~D cells still queued)."
+                     (propagation-limit-rounds c)
+                     (propagation-limit-remaining c)))))
+
+(defvar *max-propagation-rounds* 100
+  "Maximum number of flush iterations per transaction before signalling
+PROPAGATION-LIMIT-EXCEEDED.  Set to NIL to disable the cap (not recommended).")
+
 (defvar *transaction* nil
   "When non-nil, a transaction is active and notifications are deferred.
 Bound to a transaction struct by WITH-TRANSACTION.")
@@ -88,8 +113,15 @@ Bound to a transaction struct by WITH-TRANSACTION.")
 
 (defun tx-flush (tx)
   "Process all queued cells in height order (lowest first).
-Cells may enqueue further cells during processing; loop until empty."
-  (loop while (tx-queue tx) do
+Cells may enqueue further cells during processing; loop until empty.
+Signals PROPAGATION-LIMIT-EXCEEDED if the queue keeps refilling beyond
+*MAX-PROPAGATION-ROUNDS* iterations."
+  (loop with rounds = 0 while (tx-queue tx) do
+    (when (and *max-propagation-rounds*
+               (> (incf rounds) *max-propagation-rounds*))
+      (error 'propagation-limit-exceeded
+             :rounds rounds
+             :remaining (length (tx-queue tx))))
     (let ((sorted (sort (tx-queue tx) #'< :key #'cell-height)))
       (setf (tx-queue tx) nil)
       (clrhash (tx-seen tx))
@@ -442,3 +474,15 @@ Wraps output writes in a transaction to prevent glitches."
     (dolist (input (propagator-inputs propagator))
       (unwatch input watcher)))
   (setf (propagator-installed-watchers propagator) nil))
+
+;;; -------------------------------------------------------
+;;; Rational size guard
+;;; -------------------------------------------------------
+
+(defun rational-too-large-p (value &optional (limit (expt 2 128)))
+  "Return T if VALUE is a rational whose numerator or denominator
+exceeds LIMIT (default 2^128).  Useful for detecting runaway growth
+in propagator cycles that converge to irrational fixed points."
+  (and (rationalp value)
+       (or (> (abs (numerator value)) limit)
+           (> (abs (denominator value)) limit))))

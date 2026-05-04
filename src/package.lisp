@@ -94,7 +94,13 @@
    #:cell-watcher
    #:make-cell-watcher
    #:*cell-lock*
-   #:with-cell-lock))
+   #:with-cell-lock
+   ;; Convergence safety
+   #:propagation-limit-exceeded
+   #:propagation-limit-rounds
+   #:propagation-limit-remaining
+   #:*max-propagation-rounds*
+   #:rational-too-large-p))
 
 (defpackage #:fluxion.render
   (:use #:cl #:fluxion.components)

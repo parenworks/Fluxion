@@ -63,6 +63,10 @@
   :description "Request logging, health endpoint, SSE stress."
   :in fluxion-suite)
 
+(def-suite convergence-suite
+  :description "Convergence safety: iteration cap, rational guard, tolerance."
+  :in fluxion-suite)
+
 (def-suite integration-suite
   :description "End-to-end HTTP integration tests."
   :in fluxion-suite)

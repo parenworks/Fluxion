@@ -60,6 +60,7 @@
      (:file "test-thread-safety")
      (:file "test-session-reaper")
      (:file "test-propagators")
+     (:file "test-convergence")
      (:file "test-components")
      (:file "test-server")
      (:file "test-router")
