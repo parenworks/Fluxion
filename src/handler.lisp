@@ -190,38 +190,39 @@ HTML page response."
                              (string= path "/sse"))
                         (let ((queue (ensure-event-queue session)))
                           ;; Return a streaming callback for Clack.
-                          ;; The responder call sends headers synchronously,
-                          ;; then we spawn a dedicated thread for the
-                          ;; blocking event loop so Woo's event loop stays
-                          ;; free for other requests.  The writer internally
-                          ;; uses wev:with-async-writing which schedules
-                          ;; writes back on the event loop.  On Hunchentoot
-                          ;; this simply frees the request thread back to
-                          ;; the pool.
+                          ;; On Woo (async), we spawn a dedicated thread so
+                          ;; the event loop stays free for other requests.
+                          ;; On Hunchentoot (thread-per-connection), we must
+                          ;; block inside the callback — returning would let
+                          ;; Hunchentoot finalize the response and corrupt
+                          ;; the chunked stream the SSE writer is using.
                           (lambda (responder)
                             (let ((writer (funcall responder
                                             '(200 (:content-type "text/event-stream"
                                                    :cache-control "no-cache"
                                                    :x-accel-buffering "no")))))
-                              (bordeaux-threads:make-thread
-                               (lambda ()
-                                 (unwind-protect
-                                      (handler-case
-                                          (loop until (eq-closed-p queue) do
-                                            (let ((events (dequeue-all-events queue :timeout 15)))
-                                              (if events
-                                                  (dolist (event events)
-                                                    (funcall writer (format-sse-event event)))
-                                                  ;; Keep-alive: also touch session to prevent expiry
-                                                  (progn
-                                                    (touch-session session)
-                                                    (funcall writer
-                                                             (format nil ": keepalive~%~%"))))))
-                                        (error ()
-                                          ;; Client disconnected
-                                          nil))
-                                   (ignore-errors (funcall writer nil :close t))))
-                               :name "fluxion-sse-writer")))))
+                              (flet ((sse-loop ()
+                                       (unwind-protect
+                                            (handler-case
+                                                (loop until (eq-closed-p queue) do
+                                                  (let ((events (dequeue-all-events queue :timeout 15)))
+                                                    (if events
+                                                        (dolist (event events)
+                                                          (funcall writer (format-sse-event event)))
+                                                        ;; Keep-alive: also touch session to prevent expiry
+                                                        (progn
+                                                          (touch-session session)
+                                                          (funcall writer
+                                                                   (format nil ": keepalive~%~%"))))))
+                                              (error ()
+                                                ;; Client disconnected
+                                                nil))
+                                         (ignore-errors (funcall writer nil :close t)))))
+                                (if (eq (app-server app) :woo)
+                                    ;; Woo: spawn a thread to avoid blocking the event loop
+                                    (bt:make-thread #'sse-loop :name "fluxion-sse-writer")
+                                    ;; Hunchentoot/others: block the request thread
+                                    (sse-loop)))))))
 
                        ;; All POST routes require a valid CSRF token
                        ((and (eq method :post)
