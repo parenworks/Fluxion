@@ -33,6 +33,9 @@ The reactive layer is called Lattice. Cells hold values, computed cells derive f
 
 ;; Temperature converter (bidirectional propagators)
 (fluxion.examples.converter:start-converter :port 5222)
+
+;; Colour picker (bidirectional propagators, live sliders)
+(fluxion.examples.colour-picker:start-colour-picker :port 5222)
 ```
 
 ## Architecture
@@ -41,14 +44,23 @@ The reactive layer is called Lattice. Cells hold values, computed cells derive f
 fluxion/
   fluxion.asd              ; ASDF system definitions
   src/
-    package.lisp           ; package definitions
+    package.lisp           ; package definitions and umbrella re-exports
     protocol.lisp          ; SSE/JSON event protocol
     events.lisp            ; event type constructors
     signals.lisp           ; server-side signal store
     cells.lisp             ; Lattice: cells, computed cells, propagators
     components.lisp        ; CLOS component model, defaction, defcomponent
     render.lisp            ; Spinneret rendering helpers
-    server.lisp            ; Clack/Hunchentoot, sessions, SSE push, action dispatch
+    app.lisp               ; fluxion-app class, component/session registration
+    session.lisp           ; session management and component lookup
+    handler.lisp           ; Clack app builder, SSE streaming, action dispatch
+    router.lisp            ; URL router with path parameters and guards
+    auth.lisp              ; session authentication and role-based access
+    csrf.lisp              ; CSRF token validation
+    event-queue.lisp       ; thread-safe SSE event queue
+    reaper.lisp            ; background session expiry
+    conditions.lisp        ; framework condition types
+    validation.lisp        ; server-side form validation DSL
   client/
     package.lisp           ; client package
     runtime.lisp           ; Parenscript browser runtime (morph, EventSource, data-* binding)
@@ -58,6 +70,7 @@ fluxion/
     counter.lisp           ; counter with cells, defcomponent, and server-pushed clock
     todo.lisp              ; todo list with sessions and data-* attributes
     converter.lisp         ; temperature converter with bidirectional propagators
+    colour-picker.lisp     ; colour picker with bidirectional RGB/HSV propagators
 ```
 
 ## Defining Components
@@ -496,6 +509,8 @@ Action responses (POST to `/action/...`) return these events in the response bod
 | `data-key="Enter"` | Only fire `data-on-keydown` for this key |
 | `data-param-foo="bar"` | Include `foo: "bar"` in the POST body. Works with any `data-on-*` |
 | `data-confirm="Sure?"` | Show a confirmation dialog before executing a click action |
+| `data-disable-during-request` | Disable the element while the POST is in flight. Re-enables on response |
+| `data-debounce="50"` | Throttle `data-on-input` events to fire at most once per N milliseconds |
 | `data-bind="signal-name"` | Two-way bind input value to a client-side signal |
 | `data-text="$signal-name"` | Display signal value as text content |
 
@@ -580,7 +595,8 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment with Caddy, nginx, 
 - **v0.7** - CSRF protection, test suite, authentication, routing, form validation
 - **v0.8** - glitch-free transactions, height-based topological scheduling
 - **v0.9** - thread-safe cell graph, concurrent writer support
-- **v1.0** - Woo backend, health endpoint, request logging, SSE stress testing, GUIDE.md (current)
+- **v1.0** - Woo backend, health endpoint, request logging, SSE stress testing, GUIDE.md
+- **v1.1** - Non-blocking SSE (threaded writer), DOM morph fixes (clone-node, value property sync), umbrella package (current)
 
 ## Licence
 

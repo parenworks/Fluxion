@@ -1,20 +1,30 @@
 ;;;; -*- encoding:utf-8 -*-
-;;;; Fluxion - Server-side signal model
+;;;; Fluxion - Server-side signal model (DEPRECATED)
+;;;;
+;;;; This module is superseded by the Lattice reactive engine
+;;;; (cells, computed cells, propagators, transactions) in cells.lisp.
+;;;; The signal-store class is retained for backwards compatibility but
+;;;; should not be used in new code.  Use make-cell / computed instead.
+;;;;
+;;;; Note: make-signal-event in events.lisp and client-side signal
+;;;; handling (fluxion-get-signal etc.) remain useful for pushing
+;;;; lightweight key/value updates to the browser and are unaffected
+;;;; by this deprecation.
 
 (in-package #:fluxion.signals)
 
 ;;; -------------------------------------------------------
-;;; Signal store
+;;; Signal store (DEPRECATED - use Lattice cells instead)
 ;;; -------------------------------------------------------
-;;; A signal store is a simple key/value map that tracks
-;;; reactive state.  For v0.1 this is a thin wrapper around
-;;; a hash-table.  The propagator/cell model (Lattice) will
-;;; replace this in a later version.
 
 (defclass signal-store ()
   ((signals :initform (make-hash-table :test 'equal)
             :accessor %signals
             :documentation "Hash-table mapping signal names (strings) to values.")))
+
+(defmethod print-object ((s signal-store) stream)
+  (print-unreadable-object (s stream :type t :identity t)
+    (format stream "~D signal~:P" (hash-table-count (%signals s)))))
 
 (defun make-signal-store ()
   "Create a new empty signal store."

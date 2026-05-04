@@ -13,6 +13,7 @@
                "lack"
                "cl-json"
                "babel"
+               "ironclad"
                "bordeaux-threads"
                "hunchentoot"
                "clack-handler-woo"
@@ -30,13 +31,21 @@
      (:file "cells")
      (:file "render")
      (:file "validation")
-     (:file "server")))))
+     (:file "conditions")
+     (:file "csrf")
+     (:file "event-queue")
+     (:file "session")
+     (:file "auth")
+     (:file "app")
+     (:file "router")
+     (:file "reaper")
+     (:file "handler")))))
 
 (defsystem "fluxion/tests"
   :name "fluxion-tests"
   :version "0.1.0"
   :description "Test suite for Fluxion."
-  :depends-on ("fluxion" "fluxion/client" "fiveam")
+  :depends-on ("fluxion" "fluxion/client" "fiveam" "dexador" "usocket")
   :serial t
   :components
   ((:module "tests"
@@ -55,7 +64,8 @@
      (:file "test-server")
      (:file "test-router")
      (:file "test-validation")
-     (:file "test-observability")))))
+     (:file "test-observability")
+     (:file "test-integration")))))
 
 (defsystem "fluxion/client"
   :name "fluxion-client"

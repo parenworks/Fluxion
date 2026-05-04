@@ -7,6 +7,8 @@
 ;;;;   - Checkbox toggling with data-on-change
 ;;;;   - Element-specific params with data-param-*
 ;;;;   - Confirmation dialogs with data-confirm
+;;;;   - data-disable-during-request for click deduplication
+;;;;   - Router-based page serving
 ;;;;
 ;;;; Usage:
 ;;;;   (ql:quickload :fluxion/examples)
@@ -14,7 +16,7 @@
 ;;;;   ;; Open http://localhost:5000
 
 (defpackage #:fluxion.examples.todo
-  (:use #:cl)
+  (:use #:cl #:fluxion)
   (:export #:start-todo
            #:stop-todo))
 
@@ -40,24 +42,24 @@
 ;;; Component
 ;;; -------------------------------------------------------
 
-(defclass todo-list (fluxion.components:component)
+(defclass todo-list (component)
   ((items :initform nil :accessor todo-items))
   (:default-initargs :id "todo-list"))
 
-(defun find-todo (component id)
+(defun find-todo (comp id)
   "Find a todo item by ID."
-  (find id (todo-items component) :key #'todo-id :test #'string=))
+  (find id (todo-items comp) :key #'todo-id :test #'string=))
 
 ;;; -------------------------------------------------------
 ;;; Render
 ;;; -------------------------------------------------------
 
-(defmethod fluxion.components:render ((c todo-list))
+(defmethod render ((c todo-list))
   (let ((items (todo-items c))
         (done-count (count-if #'todo-done (todo-items c)))
         (total (length (todo-items c))))
     (spinneret:with-html-string
-      (:div :id (fluxion.components:component-id c)
+      (:div :id (component-id c)
             :class "todo-component"
         (:h2 "Todo List")
 
@@ -76,6 +78,7 @@
             (when (plusp done-count)
               (:button :data-on-click "/action/todo-list/clear-done"
                        :data-confirm "Remove all completed items?"
+                       :data-disable-during-request t
                        :class "clear-btn"
                        "Clear completed"))))
 
@@ -100,27 +103,29 @@
 ;;; Actions
 ;;; -------------------------------------------------------
 
-(fluxion.components:defaction todo-list :add (c params)
+(defaction todo-list :add (c params)
   (let ((value (cdr (assoc :value params))))
     (when (and value (plusp (length (string-trim " " value))))
       (push (make-todo (string-trim " " value)) (todo-items c))))
-  nil)
+  (append (patch-component c)
+          (list (make-script-event
+                 "var el = document.querySelector('#todo-list [data-on-keydown]'); if(el) el.value = '';"))))
 
-(fluxion.components:defaction todo-list :toggle (c params)
+(defaction todo-list :toggle (c params)
   (let* ((id (cdr (assoc :id params)))
          (item (and id (find-todo c id))))
     (when item
       (setf (todo-done item) (not (todo-done item)))))
   nil)
 
-(fluxion.components:defaction todo-list :delete (c params)
+(defaction todo-list :delete (c params)
   (let ((id (cdr (assoc :id params))))
     (when id
       (setf (todo-items c)
             (remove id (todo-items c) :key #'todo-id :test #'string=))))
   nil)
 
-(fluxion.components:defaction todo-list :clear-done (c)
+(defaction todo-list :clear-done (c)
   (setf (todo-items c)
         (remove-if #'todo-done (todo-items c)))
   nil)
@@ -130,7 +135,7 @@
 ;;; -------------------------------------------------------
 
 (defun render-todo-page (todo-list &key csrf-token)
-  (fluxion.render:render-page
+  (render-page
    :title "Fluxion Todo List"
    :csrf-token csrf-token
    :body-html
@@ -165,45 +170,46 @@
      </style>
      <h1>Fluxion</h1>
      <p>Live server-rendered interfaces for Common Lisp.</p>"
-    (fluxion.components:render todo-list))))
+    (render todo-list))))
 
 ;;; -------------------------------------------------------
-;;; Application setup
+;;; Application setup (router-based)
 ;;; -------------------------------------------------------
 
 (defvar *app* nil)
+(defvar *router* (make-router))
+
+(defroute *router* :get "/" (app session env &key params)
+  (declare (ignore app env params))
+  (let ((todo (session-component session "todo-list")))
+    (list 200
+          '(:content-type "text/html")
+          (list (render-todo-page todo
+                 :csrf-token (session-csrf-token session))))))
 
 (defun start-todo (&key (port 5000))
   (when *app*
-    (fluxion.server:stop *app*))
+    (stop *app*))
 
-  (setf *app* (fluxion.server:make-fluxion-app
+  (setf *app* (make-fluxion-app
                :port port
                :static-dir (asdf:system-relative-pathname "fluxion" "static/")))
 
   ;; Register factory - each session gets its own todo list
-  (fluxion.server:register-component-factory *app* "todo-list"
+  (register-component-factory *app* "todo-list"
     (lambda () (make-instance 'todo-list)))
 
   ;; Build the client runtime JS
   (fluxion.client:build-client)
 
-  ;; Start the server
-  (fluxion.server:start *app*
-    (lambda (app session env)
-      (declare (ignore app env))
-      (let ((todo (fluxion.server:session-component session "todo-list")))
-        (list 200
-              '(:content-type "text/html")
-              (list (render-todo-page todo
-                     :csrf-token (fluxion.server:session-csrf-token session))))))
-    :port port)
+  ;; Start the server with the router
+  (start *app* (router-handler *router*) :port port)
 
   (format t "~%Fluxion todo example running at http://localhost:~D~%" port)
   *app*)
 
 (defun stop-todo ()
   (when *app*
-    (fluxion.server:stop *app*)
+    (stop *app*)
     (setf *app* nil)
     (format t "Fluxion todo stopped.~%")))

@@ -118,6 +118,18 @@ Thread-safe: the outermost transaction holds the cell graph lock."
 ;;; Cell class
 ;;; -------------------------------------------------------
 
+(defgeneric cell-name (cell)
+  (:documentation "Optional name (string or symbol) for debugging and print representation."))
+
+(defgeneric cell-watchers (cell)
+  (:documentation "List of watcher entries called with (new-value old-value) on change."))
+
+(defgeneric cell-test (cell)
+  (:documentation "Equality function used to detect value changes (default #'equal). The cell only notifies watchers when the new value differs by this test."))
+
+(defgeneric cell-height (cell)
+  (:documentation "Topological height of the cell. 0 for base cells, max(dependency heights) + 1 for computed cells. Used for transaction ordering."))
+
 (defclass cell ()
   ((value    :initarg :value
              :initform nil
@@ -263,6 +275,9 @@ Returns the watcher entry (useful for later disconnection)."
 ;;; Computed cells
 ;;; -------------------------------------------------------
 
+(defgeneric computed-dependencies (computed-cell)
+  (:documentation "List of cells this computed cell depends on. Automatically tracked and updated on each recomputation."))
+
 (defclass computed-cell (cell)
   ((thunk        :initarg :thunk
                  :accessor computed-thunk
@@ -340,6 +355,15 @@ Updates height to max(dep heights) + 1 for topological ordering."
 ;;;
 ;;; CL's exact rational arithmetic makes bidirectional numeric
 ;;; propagators converge perfectly (no floating-point oscillation).
+
+(defgeneric propagator-name (propagator)
+  (:documentation "Optional name (string or symbol) for debugging and print representation."))
+
+(defgeneric propagator-inputs (propagator)
+  (:documentation "List of input cells that trigger this propagator when changed."))
+
+(defgeneric propagator-outputs (propagator)
+  (:documentation "List of output cells written by this propagator when it fires."))
 
 (defclass propagator ()
   ((name     :initarg :name

@@ -1,472 +1,666 @@
 # Fluxion API Reference
 
-Complete reference for all exported symbols. Organised by package.
+Auto-generated from source docstrings.
 
-## Components (`fluxion.components`)
+---
 
-### Classes
+## Components - CLOS component model, rendering, patching
 
-**`component`** - Base class for all Fluxion components.
+Package: `fluxion.components`
+
+### Class: `component`
+
+Base class for all Fluxion components.
 
 Slots:
 
-- `id` (string) - unique identifier, used as the DOM element ID. Set via `:id` initarg or auto-generated from the class name.
-- `signals` - optional signal store for client-side reactive state.
-- `dirty-p` (boolean) - whether the component needs re-rendering.
-- `last-html` - cached HTML from the last render, used for diff comparison.
+- **`id`** - Unique identifier, used as the DOM element ID and CSS selector target.
+- **`signals`** - Optional signal-store for this component's reactive state.
+- **`dirty-p`** - Whether this component needs re-rendering.
+- **`last-html`** - Cached HTML from the last render, used for dirty comparison.
 
 ### Generic Functions
 
-**`render (component)`** - return an HTML string for the component. The outermost element must have an `id` attribute matching `(component-id component)`.
+**`component-dirty-p (component)`** - Whether this component needs re-rendering. Set by mark-dirty, cleared by patch-component.
 
-**`handle-action (component action params)`** - handle an incoming action. `action` is a keyword (e.g. `:increment`). `params` is an alist of request parameters with keyword keys. Return a list of SSE events, or `nil` to auto-patch.
+**`component-id (component)`** - Unique identifier string, used as the DOM element ID and CSS selector target.
+
+**`component-last-html (component)`** - Cached HTML from the last render. Used for dirty comparison to avoid sending no-op patches.
+
+**`component-signals (component)`** - Optional signal-store for this component's client-side reactive state.
+
+**`handle-action (component action params)`** - Handle an incoming ACTION for COMPONENT.
+ACTION is a keyword symbol identifying the action.
+PARAMS is an alist of request parameters / signals.
+Methods should mutate component state and return a list of SSE
+events to send to the client, or use (patch component) as a
+convenience.
+
+**`patch-component (component &key mode force)`** - Return a list containing a single patch event for COMPONENT.
+Re-renders the component and targets its DOM selector.
+If the rendered HTML is identical to the cached version and FORCE
+is NIL, returns an empty list (no patch sent).
+
+**`render (component)`** - Render COMPONENT to an HTML string.  This is the primary method
+application code must specialise.  Should return a string of HTML
+with an element whose id matches (component-id component).
 
 ### Macros
 
-**`defcomponent name &key id slots render`** - define a component in a single form.
+**`defaction (component-class action-name (component-var &optional
+                             (params-var (gensym params))) &body body)`** *(macro)* - Define an action handler for COMPONENT-CLASS.
+ACTION-NAME is a keyword symbol (e.g. :increment).
+COMPONENT-VAR is bound to the component instance.
+PARAMS-VAR is bound to the request params alist.
+BODY should mutate state and return a list of SSE events.
+If BODY returns NIL, a default patch of the component is sent.
 
-Generates the CLOS class, cell setup, accessor functions, and render method. Inside the `:render` body, `self` is bound to the component instance.
+**`defcomponent (name &key id slots render)`** *(macro)* - Define a Fluxion component in a single form.
 
-Arguments:
-
-- `name` - class name (symbol).
-- `:id` - DOM element ID (string). Defaults to the downcased class name.
-- `:slots` - list of slot specs. Each spec is `(slot-name &key cell initform accessor test)`.
-  - `:cell t` - back the slot with a reactive cell connected to the component.
-  - `:initform value` - initial value.
-  - `:accessor name` - generate reader and `(setf reader)` functions.
-  - `:test fn` - equality test for the cell (default `eql`).
-- `:render` - body form that returns an HTML string.
-
-Example:
-
-```lisp
-(fluxion.components:defcomponent counter
-  :id "counter"
-  :slots ((count :cell t :initform 0 :accessor counter-count))
-  :render (spinneret:with-html-string
-            (:div :id (fluxion.components:component-id self)
-              (:p (format nil "Count: ~D" (counter-count self))))))
-```
-
-**`defaction component-class action-name (component-var &optional params-var) &body body`** - define an action handler.
-
-Generates a `handle-action` method specialised on `component-class` and `action-name` (a keyword). The component is automatically marked dirty before the body runs. If the body returns `nil`, a default patch is sent. Return `'()` to suppress the patch (useful when cell watchers handle it).
+NAME is the class name.
+ID is the component DOM id (string). Defaults to the downcased name.
+SLOTS is a list of slot specs. Each spec is (slot-name &key cell initform accessor test).
+  When :cell is T, the slot is backed by a reactive cell and automatically
+  connected to the component. The accessor reads/writes through cell-value.
+RENDER is a body form that returns an HTML string. Inside the body, SELF
+  is bound to the component instance.
 
 Example:
-
-```lisp
-(fluxion.components:defaction counter :increment (c)
-  (incf (counter-count c))
-  '())
-```
+  (defcomponent counter
+    :id "counter"
+    :slots ((count :cell t :initform 0 :accessor counter-count))
+    :render (spinneret:with-html-string
+              (:div :id (component-id self)
+                (:p (format nil "Count: ~D" (counter-count self))))))
 
 ### Functions
 
-**`patch-component (component &key mode force)`** - re-render the component and return a list containing a patch event. Compares against the cached HTML and returns an empty list if nothing changed, unless `:force t` is given. `:mode` defaults to `"morph"`.
+**`clear-dirty (component)`** - Clear the dirty flag on COMPONENT.
 
-**`mark-dirty (component)`** - set the dirty flag on a component.
+**`component-selector (component)`** - Return the CSS selector string that targets COMPONENT's root element.
 
-**`clear-dirty (component)`** - clear the dirty flag.
-
-**`component-selector (component)`** - return the CSS selector string (e.g. `"#my-widget"`).
+**`mark-dirty (component)`** - Mark COMPONENT as needing re-rendering.
 
 ---
 
-## Cells / Lattice (`fluxion.cells` / `fluxion.lattice`)
+## Cells / Lattice - reactive cells, computed cells, propagators, transactions
 
-The reactive engine. `fluxion.lattice` is a package nickname for `fluxion.cells`.
+Package: `fluxion.cells`
 
-### Cells
+### Class: `cell`
 
-**`make-cell (value &key name test)`** - create a new cell holding `value`.
+A reactive value container that notifies watchers on change.
 
-- `:name` - optional name string for debugging.
-- `:test` - equality function (default `eql`). The cell only notifies watchers when the new value is different according to this test.
+Slots:
 
-**`cell-value (cell)`** - read the cell's current value. Also `(setf cell-value)` to write. Writing notifies all watchers if the value changed.
+- **`value`** - The current value held by this cell.
+- **`name`** - Optional name for debugging.
+- **`watchers`** - List of functions called with (new-value old-value) on change.
+- **`equalfn`** - Comparison function to detect value changes.
+- **`height`** - Topological height. 0 for base cells, max(dep)+1 for derived.
 
-**`cell-name (cell)`** - the cell's name string.
+### Class: `cell-watcher`
 
-**`cell-height (cell)`** - the cell's height in the dependency graph. Base cells are 0, computed cells are `max(dependency heights) + 1`. Used by the transaction system for topological ordering.
+A watcher entry pairing a callback with an optional target cell for transaction ordering.
 
-**`watch (cell fn &key target)`** - add a watcher function. `fn` is called as `(funcall fn new-value old-value)` whenever the cell's value changes. Returns a `cell-watcher` struct. If `:target` is provided (a cell or computed-cell), the transaction system uses it for height-based scheduling instead of calling `fn` immediately.
+Slots:
 
-**`unwatch (cell entry)`** - remove a previously added watcher. `entry` is the `cell-watcher` struct returned by `watch`.
+- **`fn`**
+- **`target`**
 
-### Computed Cells
+### Class: `computed-cell`
 
-**`make-computed (thunk &key name)`** - create a cell whose value is computed by calling `thunk`. Dependencies are tracked automatically: any cell read during execution of the thunk becomes a dependency. When a dependency changes, the computed cell recomputes.
+A cell whose value is derived from other cells.
+The thunk is re-run whenever a dependency changes, and watchers on
+this cell are notified if the computed value changes.
 
-The thunk is a function of zero arguments. It should read cells via `cell-value` and return the derived value.
+Slots:
 
-```lisp
-(let* ((a (make-cell 2))
-       (b (make-cell 3))
-       (sum (make-computed (lambda ()
-                             (+ (cell-value a) (cell-value b))))))
-  (cell-value sum))  ;; => 5
-```
+- **`thunk`** - Zero-argument function that computes the value.
+- **`dependencies`** - List of cells this computed depends on.
+- **`update-fn`** - The watcher function installed on dependencies.
 
-### Propagators
+### Class: `propagator`
 
-**`make-propagator (&key inputs fn outputs name)`** - create a propagator that fires `fn` whenever any input cell changes.
+A propagator connects input cells to output cells.
+When any input cell changes, the function is applied to all input values
+and the result(s) written to the output cell(s).
 
-- `:inputs` - list of input cells.
-- `:fn` - function called with the current values of the input cells (one argument per input). Returns the value to write to the output(s).
-- `:outputs` - list of output cells to write the result to.
-- `:name` - optional name string.
+Slots:
 
-Propagators include a re-entrance guard to prevent infinite cycles in bidirectional networks.
+- **`name`** - Optional name for debugging.
+- **`inputs`** - List of input cells.
+- **`outputs`** - List of output cells.
+- **`fn`** - Function: receives input values as arguments, returns output value(s).
+- **`installed-watchers`** - Watcher functions installed on input cells.
+- **`active-p`** - Re-entrance guard. Prevents direct cycles.
 
-```lisp
-;; Bidirectional celsius/fahrenheit
-(make-propagator
- :inputs (list celsius)
- :fn (lambda (c) (+ (* c 9/5) 32))
- :outputs (list fahrenheit))
-(make-propagator
- :inputs (list fahrenheit)
- :fn (lambda (f) (* (- f 32) 5/9))
- :outputs (list celsius))
-```
+### Generic Functions
 
-### Transactions
+**`cell-height (cell)`** - Topological height of the cell. 0 for base cells, max(dependency heights) + 1 for computed cells. Used for transaction ordering.
 
-**`with-transaction (&body body)`** - macro. Execute `body` within a transaction. All cell notifications are deferred into a priority queue and flushed in height order when the transaction completes. This prevents glitches in diamond dependencies.
+**`cell-name (cell)`** - Optional name (string or symbol) for debugging and print representation.
 
-Transactions nest: inner transactions are absorbed by the outermost. Only the outermost transaction flushes the queue. Propagators use transactions internally.
+**`cell-test (cell)`** - Equality function used to detect value changes (default #'equal). The cell only notifies watchers when the new value differs by this test.
 
-```lisp
-;; Batch two source changes - dependents recompute once
-(with-transaction
-  (setf (cell-value x) 10)
-  (setf (cell-value y) 20))
-```
+**`cell-watchers (cell)`** - List of watcher entries called with (new-value old-value) on change.
 
-Internals (not typically called directly):
+**`computed-dependencies (computed-cell)`** - List of cells this computed cell depends on. Automatically tracked and updated on each recomputation.
 
-- `*transaction*` - dynamic variable, non-nil during an active transaction.
-- `tx` struct - holds the deferred queue and deduplication set.
-- `tx-enqueue (tx cell)` - add a cell to the deferred queue.
-- `tx-flush (tx)` - process the queue in height order until empty.
+**`propagator-inputs (propagator)`** - List of input cells that trigger this propagator when changed.
 
-### Thread Safety
+**`propagator-name (propagator)`** - Optional name (string or symbol) for debugging and print representation.
 
-**`*cell-lock*`** - the global recursive lock protecting the cell graph. You rarely need to touch this directly.
+**`propagator-outputs (propagator)`** - List of output cells written by this propagator when it fires.
 
-**`with-cell-lock (&body body)`** - macro. Execute `body` while holding the cell graph lock. Use this for read-modify-write patterns where you need atomicity across multiple cell operations that are not part of a transaction.
+### Macros
 
-```lisp
-;; Atomic increment
-(with-cell-lock
-  (let ((v (cell-value counter)))
-    (setf (cell-value counter) (1+ v))))
-```
+**`with-cell-lock (&body body)`** *(macro)* - Execute BODY while holding the cell graph lock.
 
-All cell operations (`cell-value`, `(setf cell-value)`, `watch`, `unwatch`) acquire the lock internally. `with-transaction` holds the lock for the entire transaction scope (outermost only). The lock is recursive, so watchers can safely read cells during notification.
+**`with-transaction (&body body)`** *(macro)* - Execute BODY within a transaction. All cell notifications are deferred
+and flushed in topological (height) order at the end, preventing glitches.
+Transactions nest: only the outermost transaction flushes.
+Thread-safe: the outermost transaction holds the cell graph lock.
 
-For observing consistent state across multiple cells, use a computed cell rather than reading cells individually - computed cells recompute inside the transaction after all sources are updated.
+### Functions
 
-### Component Connection
+**`cell-value (cell)`** - Read the current value of CELL.
+When called inside a computed cell's thunk, records the read for dependency tracking.
+Thread-safe: acquires the cell graph lock.
 
-**`connect (cell component)`** - wire a cell to a component. When the cell's value changes, the component is automatically re-rendered and a patch event is collected. With `defcomponent`, cell-backed slots are connected automatically.
+**`collect-event (event)`** - Append EVENT to *pending-events* if we are inside an action dispatch.
 
-**`disconnect (cell component)`** - remove the connection.
+**`collect-events (events)`** - Append a list of EVENTS to *pending-events*.
+
+**`connect (cell component &key (mode morph))`** - Connect CELL to COMPONENT so that changes auto-patch.
+When CELL's value changes, COMPONENT is re-rendered and a patch event
+is collected into *pending-events* (if bound).
+Returns the watcher entry (useful for later disconnection).
+
+**`disconnect (cell watcher)`** - Remove a previously connected watcher from CELL.
+
+**`drain-pending-events ()`** - Return and clear all pending events collected during this action.
+Returns them in the order they were collected.
+
+**`fire-propagator (propagator)`** - Run the propagator: read inputs, apply function, write outputs.
+Returns immediately if this propagator is already firing (re-entrance guard).
+Wraps output writes in a transaction to prevent glitches.
+
+**`make-cell (value &key name (test #'equal))`** - Create a new cell with initial VALUE.
+
+**`make-cell-watcher (&key ((fn fn) nil) ((target target) nil))`**
+
+**`make-computed (thunk &key name (test #'equal))`** - Create a computed cell. THUNK is a zero-argument function that reads
+other cells to produce a value. Dependencies are tracked automatically.
+
+**`make-propagator (&key inputs fn outputs name)`** - Create and activate a propagator.
+FN receives the current values of INPUTS as arguments.
+For a single output, FN returns one value.
+For multiple outputs, FN returns a list of values.
+
+**`recompute (computed)`** - Recalculate COMPUTED's value by running its thunk.
+Discovers dependencies via *tracking-reads* and rewires watchers.
+Updates height to max(dep heights) + 1 for topological ordering.
+
+**`remove-propagator (propagator)`** - Remove the propagator's watchers from its input cells.
+
+**`unwatch (cell entry)`** - Remove a watcher ENTRY from CELL's watchers.
+ENTRY may be a cell-watcher struct or the original function.
+Thread-safe: acquires the cell graph lock.
+
+**`watch (cell fn &key target)`** - Register FN as a watcher on CELL.
+FN is called with (new-value old-value) whenever the cell changes.
+TARGET optionally references the downstream cell (for transaction scheduling).
+Thread-safe: acquires the cell graph lock.
+Returns the watcher entry.
+
+### Variables
+
+**`*cell-lock*`** *(variable)* - Global recursive lock protecting the cell graph.
+
+**`*pending-events*`** *(variable)* - When bound to a list, cell-triggered watchers append SSE events here.
+Bound by the action dispatch machinery so that cell changes during an
+action automatically produce patch events in the response.
 
 ---
 
-## Server (`fluxion.server`)
+## Server - application, sessions, routing, auth, SSE push, conditions
 
-### Application
+Package: `fluxion.server`
 
-**`make-fluxion-app (&key port static-dir session-ttl reaper-interval server)`** - create a new Fluxion application.
+### Class: `action-dispatch-error`
 
-- `:port` - server port (default 5000).
-- `:static-dir` - directory for serving static files under `/static/`.
-- `:session-ttl` - seconds before idle sessions expire (default 3600).
-- `:reaper-interval` - seconds between reaper runs (default 60).
-- `:server` - Clack backend keyword. `:woo` (default) uses libev for async I/O and handles many concurrent SSE connections with minimal thread overhead. `:hunchentoot` is available as an alternative with better debug error pages.
-- `:request-log` - when non-nil (default `T`), logs every request to `*standard-output*` with method, path, status code, and elapsed time in milliseconds.
+Signalled when an action handler fails.
 
-**`start (app page-handler &key port server)`** - start the server. `page-handler` is a function `(app session env)` that returns a Clack response list `(status headers body)`. Both `:port` and `:server` can override the values set in `make-fluxion-app`.
+Slots:
 
-**`stop (app)`** - stop the server and the session reaper.
+- **`path`**
+- **`cause`**
 
-### Health Endpoint
+### Class: `component-not-found`
 
-A built-in `GET /health` endpoint is available on every Fluxion app. It returns JSON with no session required:
+Signalled when a component ID cannot be resolved.
 
-```json
-{
-  "status": "ok",
-  "uptimeSeconds": 3661,
-  "uptimeHuman": "0d 1h 1m 1s",
-  "sessions": 42,
-  "sseConnections": 38,
-  "server": "woo",
-  "port": 5000
-}
-```
+Slots:
 
-### Observability
+- **`component-id`**
 
-**`app-uptime-seconds (app)`** - seconds since the server was started.
+### Class: `csrf-validation-error`
 
-**`app-session-count (app)`** - current number of active sessions.
+Signalled when a CSRF token is missing or invalid.
 
-**`app-sse-connection-count (app)`** - number of sessions with active (not closed) SSE event queues.
+### Class: `fluxion-app`
 
-**`log-request (method path status elapsed-ms)`** - write a structured log line to `*standard-output*`.
+Top-level Fluxion application.
 
-### Component Registry
+Slots:
 
-**`register-component (app component)`** - register a global (shared) component instance.
+- **`components`** - Registry of global component instances, keyed by component-id.
+- **`component-factories`** - Factory functions keyed by component-id. Called to create per-session instances.
+- **`actions`** - Registry of action handlers, keyed by URL path string.
+- **`sessions`** - Session store, keyed by session-id string.
+- **`session-lock`**
+- **`session-ttl`** - Session time-to-live in seconds. Default 1 hour.
+- **`reaper-thread`** - Background thread that periodically removes expired sessions.
+- **`reaper-stop-flag`** - When T, the reaper thread exits on its next cycle.
+- **`reaper-interval`** - Seconds between session reaper runs. Default 60.
+- **`static-dir`** - Directory path for serving static files (fluxion.js, etc).
+- **`handler`** - The running Clack handler (used for stopping).
+- **`port`**
+- **`server`** - Clack server backend. :woo (default) or :hunchentoot.
+- **`started-at`** - Universal time when the server was started.
+- **`request-log`** - When non-nil, log every request to *standard-output*.
 
-**`register-component-factory (app id factory-fn)`** - register a factory function for per-session component creation. `id` is the component-id string. `factory-fn` is `(lambda () ...)` returning a fresh component.
+### Class: `fluxion-error`
 
-**`find-component (app id &key session)`** - look up a component. Checks the session first, then global registrations.
+Base condition for all Fluxion framework errors.
 
-### Sessions
+Slots:
 
-**`session`** - class representing a browser session.
+- **`message`**
 
-**`session-id (session)`** - the session ID string.
+### Class: `request-parse-error`
 
-**`session-component (session id)`** - look up a component by ID within a session.
+Signalled when a request body cannot be parsed.
 
-**`session-components (session)`** - the hash table of all components in the session.
+Slots:
 
-**`session-csrf-token (session)`** - the session's CSRF token string. Pass this to `render-page` so the client can include it in POST requests.
+- **`body`**
 
-### Session Reaping
+### Class: `router`
 
-**`reap-sessions (app)`** - remove all expired sessions from the app. Closes their event queues so SSE streaming threads terminate cleanly. Returns the number of sessions reaped. Called automatically by the reaper thread but can also be called manually.
+Path-based request router.
 
-**`touch-session (session)`** - update the session's last-accessed-at timestamp. Called automatically on each HTTP request via `get-or-create-session`. Prevents the session from being reaped.
+Slots:
 
-**`session-expired-p (session ttl)`** - return T if the session has not been accessed within `ttl` seconds.
+- **`routes`** - List of route objects in registration order.
+- **`not-found-handler`** - Optional handler for 404. Signature: (app session env).
 
-**`start-session-reaper (app)`** - start the background reaper thread. Called automatically by `start`.
+### Class: `session`
 
-**`stop-session-reaper (app)`** - stop the reaper thread gracefully via a stop flag. Called automatically by `stop`.
+A per-browser session holding its own component instances.
 
-The reaper thread uses `handler-case` to catch and log errors during each cycle, so a problem with one session does not crash the reaper. When sessions are reaped, their event queues are closed outside the session lock to avoid potential deadlocks with the SSE streaming thread.
+Slots:
 
-### CSRF Protection
+- **`id`**
+- **`components`** - Component instances for this session, keyed by component-id.
+- **`created-at`**
+- **`last-accessed-at`** - Universal time of last request using this session.
+- **`event-queue`** - Event queue for persistent SSE push. Created on first /sse connect.
+- **`csrf-token`** - Random token for CSRF protection. Validated on every POST.
+- **`user`** - Application-defined user data. NIL when not authenticated.
+- **`user-roles`** - List of role keywords for the authenticated user, e.g. (:admin :editor).
 
-Every session gets a unique CSRF token on creation. The server rejects any POST request where the `X-CSRF-Token` header does not match the session's token (returns 403). The client runtime reads the token from a `<meta name="fluxion-csrf">` tag and sends it automatically.
+### Class: `session-not-found`
 
-### Authentication
+Signalled when a session ID cannot be resolved.
 
-**`session-user (session)`** - the application-defined user data stored on the session. NIL when not authenticated. Can be any value: string, plist, CLOS object, etc.
+Slots:
 
-**`session-user-roles (session)`** - list of role keywords for the authenticated user (e.g. `(:admin :editor)`).
+- **`session-id`**
 
-**`authenticated-p (session)`** - return T if the session has an authenticated user (i.e. `session-user` is non-NIL).
+### Generic Functions
 
-**`authenticate (session user &key roles)`** - set the authenticated user on the session. `user` is any application-defined value. `:roles` is an optional list of role keywords. Regenerates the CSRF token to prevent session fixation.
+**`action-dispatch-error-cause (condition)`** - The underlying error that caused the action dispatch failure.
 
-**`logout (session)`** - clear the user and roles from the session. Regenerates the CSRF token.
+**`action-dispatch-error-path (condition)`** - The URL path of the action that failed.
 
-**`has-role-p (session role)`** - return T if the session's user has `role` in their roles list. Returns NIL for unauthenticated sessions.
+**`app-handler (app)`** - The running Clack handler reference (used for stopping the server).
 
-**`require-auth (session &key login-url)`** - auth guard for page handlers. Returns NIL if the user is authenticated (proceed normally). Returns a 303 redirect response to `login-url` (default `"/login"`) if not authenticated. Use with `or`:
+**`app-reaper-interval (app)`** - Seconds between session reaper runs.
 
-```lisp
-(or (require-auth session) (render-my-page ...))
-```
+**`app-request-log (app)`** - When non-nil, every request is logged to *standard-output*.
 
-**`require-role (session role &key login-url forbidden-url)`** - role guard for page handlers. Returns NIL if the user has the role. Redirects to `login-url` if not authenticated. Returns 403 if authenticated but lacking the role, or redirects to `forbidden-url` if provided.
+**`app-server (app)`** - Clack server backend keyword (:woo or :hunchentoot).
 
-### Router
+**`app-session-lock (app)`** - Lock protecting concurrent access to the session store.
 
-**`router`** - class representing a path-based request router.
+**`app-session-ttl (app)`** - Session time-to-live in seconds before idle expiry.
 
-**`make-router (&key not-found-handler)`** - create a new router. `not-found-handler` is an optional function `(app session env)` called when no route matches. If omitted, unmatched requests get a plain 404.
+**`app-sessions (app)`** - Hash table of active sessions keyed by session-id string.
 
-**`add-route (router method pattern handler &key guard name)`** - register a route.
+**`app-started-at (app)`** - Universal time when the server was started.
 
-- `method` - `:get`, `:post`, or `:any`.
-- `pattern` - URL path pattern. Literal segments are matched exactly. Segments starting with `:` are parameters (e.g. `"/users/:id"`). Extracted values are strings.
-- `handler` - function `(app session env &key params)` returning a Clack response. `params` is an alist of extracted path parameters with keyword keys.
-- `:guard` - optional function `(session)`. If it returns a non-NIL response, that response is sent and the handler is skipped. Pairs well with `require-auth` and `require-role`.
-- `:name` - optional route name (for future URL generation).
+**`component-not-found-id (condition)`** - The component-id string that could not be resolved.
 
-**`defroute (router-var method pattern args &body body)`** - macro shorthand for `add-route` with an inline lambda.
+**`eq-closed-p (queue)`** - Whether the event queue has been closed.
 
-```lisp
-(defroute r :get "/users/:id" (app session env &key params)
-  (let ((id (cdr (assoc :id params))))
-    ...))
-```
+**`find-component (app id &key session)`** - Find a component by ID. Checks session first, then global registry.
 
-**`dispatch-route (router app session env)`** - find the first matching route and dispatch it. Returns a Clack response. Called internally by `router-handler`.
+**`fluxion-error-message (condition)`** - Human-readable error message for the condition.
 
-**`router-handler (router)`** - return a page-handler function suitable for passing to `start`. Bridges the router into the existing server.
+**`parse-request-body (env)`** - Parse the request body from a Clack ENV as a JSON alist.
+Returns NIL if no body or parse failure.
+Override or wrap with :around methods for custom content types.
 
-### Server Push
+**`push-component-patch (session component &key mode)`** - Re-render COMPONENT and push a patch event to SESSION's SSE stream.
 
-These functions push events to a session's persistent SSE connection (the `/sse` endpoint).
+**`register-action (app path handler-fn)`** - Register an action handler function for PATH.
+HANDLER-FN is a function of (app env) that should return a list
+of SSE events to send, or write directly to an event stream.
 
-**`push-event (session event)`** - push a single SSE event. The event is delivered to the browser via the EventSource stream. Does nothing if the session has no active SSE connection.
+**`register-component (app component)`** - Register a global (shared) COMPONENT instance in APP.
 
-**`push-events (session events)`** - push a list of SSE events.
+**`register-component-factory (app id factory-fn)`** - Register a factory function for per-session component creation.
+ID is the component-id string. FACTORY-FN is a function of zero arguments
+that returns a fresh component instance.
 
-**`push-component-patch (session component &key mode)`** - re-render the component and push a patch event to the session. Marks the component dirty and forces the patch.
+**`session-component (session id)`** - Find a component by ID within a SESSION.
 
-### SSE Connection Recovery
+**`session-components (session)`** - Hash table of component instances for this session, keyed by component-id.
 
-The client automatically reconnects when the SSE connection drops. The reconnect strategy uses exponential backoff with jitter:
+**`session-csrf-token (session)`** - The session's CSRF token string. Validated on every POST request.
 
-- Base delay: 1 second, doubles each attempt, capped at 30 seconds
-- Jitter: 50-100% of the computed delay (prevents thundering herd)
-- Maximum 50 attempts before giving up
-- Backoff resets to 1 second on successful reconnection
+**`session-event-queue (session)`** - The SSE event queue for this session. Created on first /sse connection.
 
-Visual feedback:
+**`session-id (session)`** - Unique session identifier string (used as the cookie value).
 
-- Amber banner: "Connection lost. Reconnecting in Ns..."
-- Green flash: "Reconnected" (auto-dismisses after 2 seconds)
-- Red banner with "Reconnect" button: shown after max retries exhausted
+**`session-not-found-id (condition)`** - The session-id string that could not be resolved.
 
-The client exposes `fluxionReconnect()` as a global function for the manual reconnect button. Application code can also call it programmatically from a `fluxion-script` event if needed.
+**`session-user (session)`** - Application-defined user data. NIL when not authenticated.
 
-### SSE Helpers
+**`session-user-roles (session)`** - List of role keywords for the authenticated user, e.g. (:admin :editor).
 
-**`send-event (stream event)`** - write a single SSE event to a stream (used in action response bodies).
+**`start (app page-handler &key)`** - Start the Fluxion application server.
 
-**`send-events (stream events)`** - write multiple SSE events to a stream.
+**`stop (app)`** - Stop the Fluxion application server.
 
-**`patch (stream component &key mode)`** - render a component and write a patch event to a stream.
+### Macros
+
+**`defroute (router-var method pattern args &body body)`** *(macro)* - Define a route on ROUTER-VAR.
+METHOD is :get, :post, or :any.
+PATTERN is a URL path like "/users/:id".
+ARGS is a lambda list (app session env &key params).
+
+Example:
+  (defroute *router* :get "/" (app session env &key params)
+    (list 200 '(:content-type "text/html") (list "Hello")))
+
+  (defroute *router* :get "/users/:id" (app session env &key params)
+    (let ((user-id (cdr (assoc :id params))))
+      ...))
+
+### Functions
+
+**`add-route (router method pattern handler &key guard name)`** - Add a route to the router. METHOD is :get, :post, or :any.
+PATTERN is a URL path like "/users/:id".
+HANDLER is (app session env &key params) -> response.
+GUARD is an optional (session) -> response-or-nil.
+
+**`app-session-count (app)`** - Return the current number of active sessions.
+
+**`app-sse-connection-count (app)`** - Return the number of sessions with active (not closed) event queues.
+
+**`app-uptime-seconds (app)`** - Return seconds since the app was started, or 0 if not started.
+
+**`authenticate (session user &key roles)`** - Set the authenticated user on SESSION.
+USER can be any application-defined value (string, plist, CLOS object, etc.).
+ROLES is an optional list of role keywords.
+Regenerates the CSRF token to prevent session fixation.
+
+**`authenticated-p (session)`** - Return T if SESSION has an authenticated user.
+
+**`close-event-queue (queue)`** - Mark QUEUE as closed and wake any waiting reader.
+
+**`dispatch-route (router app session env)`** - Find and dispatch the first matching route. Returns a Clack response.
+If no route matches, calls the not-found-handler or returns 404.
+
+**`ensure-event-queue (session)`** - Return the session's event queue, creating it if needed.
+Closes any existing queue first so that the previous SSE loop
+terminates cleanly and does not steal events from the new connection.
+
+**`format-log-timestamp ()`** - Return a timestamp string for log output.
+
+**`has-role-p (session role)`** - Return T if SESSION's user has ROLE in their roles list.
+
+**`health-response (app)`** - Return a JSON health check response.
+
+**`log-request (method path status elapsed-ms)`** - Log a request in structured format.
+
+**`logout (session)`** - Clear the authenticated user from SESSION.
+Regenerates the CSRF token.
+
+**`make-fluxion-app (&key (port 5000) static-dir (session-ttl 3600) (reaper-interval 60) (server woo) (request-log
+                                                                                  t))`** - Create a new Fluxion application instance.
+SERVER is the Clack backend: :woo (default) or :hunchentoot.
+Woo uses libev for async I/O. Install libev-dev to use it.
+REQUEST-LOG: when non-nil (default T), logs every request.
+
+**`make-router (&key not-found-handler)`** - Create a new router instance.
+
+**`patch (stream component &key (mode morph))`** - Convenience: render COMPONENT and write a patch event to STREAM.
+
+**`push-event (session event)`** - Push an SSE event to a session's persistent SSE connection.
+The event will be delivered to the browser via the EventSource stream.
+
+**`push-events (session events)`** - Push multiple SSE events to a session's persistent connection.
+
+**`reap-sessions (app)`** - Remove expired sessions from APP. Closes event queues so SSE
+threads unblock and terminate cleanly. Returns the number reaped.
+
+**`require-auth (session &key (login-url /login))`** - If SESSION is not authenticated, return a redirect response to LOGIN-URL.
+Returns NIL if the user is authenticated (meaning: proceed normally).
+Use in page handlers as a guard:
+  (or (require-auth session) (render-protected-page ...))
+
+**`require-role (session role &key (login-url /login) (forbidden-url nil))`** - If SESSION's user lacks ROLE, return a redirect or 403 response.
+Returns NIL if the user has the role (meaning: proceed normally).
+If the user is not authenticated at all, redirects to LOGIN-URL.
+If authenticated but lacking the role, returns 403 (or redirects to FORBIDDEN-URL).
+
+**`router-handler (router)`** - Return a page-handler function suitable for passing to start.
+This bridges the router into the existing Fluxion server.
+
+**`send-event (stream event)`** - Write a single SSE-EVENT to STREAM.
+
+**`session-expired-p (session ttl)`** - Return T if SESSION has not been accessed within TTL seconds.
+
+**`start-session-reaper (app)`** - Start the background session reaper thread for APP.
+
+**`stop-session-reaper (app)`** - Stop the background session reaper thread gracefully.
+Sets the stop flag, interrupts the sleeping thread, and waits briefly.
+
+**`touch-session (session)`** - Update the last-accessed-at timestamp on SESSION.
+
+### Variables
+
+**`*current-session*`** *(variable)* - The session for the current request. Bound during request dispatch.
 
 ---
 
-## Events (`fluxion.events`)
+## Events - SSE event constructors
 
-All event constructors return an `sse-event` struct suitable for `send-event`, `push-event`, or inclusion in an action response.
+Package: `fluxion.events`
 
-**`make-patch-event (selector html &key mode)`** - patch (morph or replace) the element matching `selector` with `html`. `:mode` is `"morph"` (default) or `"replace"`.
+### Functions
 
-**`make-remove-event (selector)`** - remove the element matching `selector`.
+**`make-append-event (selector fragment &key id)`** - Create an append-elements event.
+Appends FRAGMENT as a child of the element matching SELECTOR.
 
-**`make-append-event (selector html)`** - append `html` as the last child of the element matching `selector`.
+**`make-patch-event (selector fragment &key (mode morph) id)`** - Create a patch-elements event.
+SELECTOR is a CSS selector string.
+FRAGMENT is the HTML string to patch into the DOM.
+MODE is one of "morph", "replace", "inner" (default: "morph").
 
-**`make-prepend-event (selector html)`** - prepend `html` as the first child.
+**`make-prepend-event (selector fragment &key id)`** - Create a prepend-elements event.
+Prepends FRAGMENT as a child of the element matching SELECTOR.
 
-**`make-signal-event (signals)`** - update client-side signals. `signals` is an alist of `(name . value)` pairs.
+**`make-redirect-event (url &key id)`** - Create a redirect event.
+URL is the location to navigate to.
 
-**`make-script-event (script)`** - execute `script` (a JavaScript string) in the browser.
+**`make-remove-event (selector &key id)`** - Create a remove-elements event.
+SELECTOR is a CSS selector for the element(s) to remove.
 
-**`make-redirect-event (url)`** - redirect the browser to `url`.
+**`make-script-event (script &key id)`** - Create an execute-script event.
+SCRIPT is a JavaScript string to evaluate on the client.
 
----
-
-## Protocol (`fluxion.protocol`)
-
-Low-level SSE formatting. Most users won't need these directly.
-
-**`sse-event`** - struct with slots: `type`, `data`, `id`, `retry`.
-
-**`make-sse-event (&key type data id retry)`** - create an SSE event struct.
-
-**`format-sse-event (event)`** - format an event as a string in `text/event-stream` format.
-
-**`write-sse-event (event stream)`** - write an event to a stream.
+**`make-signal-event (signals &key id)`** - Create a patch-signals event.
+SIGNALS is an alist of signal-name / value pairs to update on the client.
 
 ---
 
-## Render (`fluxion.render`)
+## Protocol - low-level SSE formatting
 
-**`render-page (&key title body-html head-html csrf-token script-path)`** - render a full HTML page with the Fluxion client runtime included.
+Package: `fluxion.protocol`
 
-- `:title` - the page title.
-- `:body-html` - HTML string for the body.
-- `:head-html` - optional extra HTML for the head.
-- `:csrf-token` - session CSRF token. When provided, a `<meta name="fluxion-csrf" content="TOKEN">` tag is emitted in the head.
-- `:script-path` - path to fluxion.js (default `"/static/fluxion.js"`).
+### Class: `sse-event`
 
-**`csrf-meta-tag (token)`** - return an HTML meta tag string for the given CSRF token. Used internally by `render-page`, but available if you build pages manually.
+Slots:
 
-**`fluxion-script-tag ()`** - return the `<script>` tag that loads `/static/fluxion.js`.
+- **`event-type`** - The SSE event type field.
+- **`event-data`** - The event payload, will be JSON-encoded.
+- **`event-id`** - Optional SSE event ID.
+- **`event-retry`** - Optional SSE retry interval in milliseconds.
 
----
+### Generic Functions
 
-## Validation (`fluxion.validation`)
+**`event-data (event)`** - The event payload (alist), JSON-encoded when formatted.
 
-Server-side form validation with SSE error feedback.
+**`event-id (event)`** - Optional SSE event ID. The browser uses this for reconnection (Last-Event-ID).
 
-### Validation Result
+**`event-retry (event)`** - Optional SSE retry interval in milliseconds. Tells the browser how long to wait before reconnecting.
 
-**`validation-result`** - class holding field errors from a validation run.
+**`event-type (event)`** - The SSE event type field (e.g. "fluxion-patch", "fluxion-script").
 
-**`make-validation-result ()`** - create an empty result.
+### Functions
 
-**`add-error (result field message)`** - add an error message for a field. Only the first error per field is kept.
+**`format-sse-event (event)`** - Format an SSE-EVENT as a string suitable for text/event-stream output.
 
-**`field-error (result field)`** - return the error message for a field, or NIL if valid.
+**`write-sse-event (event stream)`** - Write an SSE-EVENT to STREAM in text/event-stream format.
 
-**`valid-p (result)`** - return T if the result has no errors.
+### Variables
 
-**`errors-alist (result)`** - return errors as `((field . message) ...)`.
+**`+append-elements+`** *(variable)* - SSE event type string for appending child elements.
 
-**`errors-plist (result)`** - return errors as `(:field message ...)`.
+**`+execute-script+`** *(variable)* - SSE event type string for executing JavaScript on the client.
 
-### Validate
+**`+patch-elements+`** *(variable)* - SSE event type string for DOM patch operations.
 
-**`validate (params rules)`** - run validation rules against a params alist. Returns a `validation-result`.
+**`+patch-signals+`** *(variable)* - SSE event type string for updating client-side signals.
 
-`params` is an alist of `(field-string . value-string)` pairs (the format Fluxion action handlers receive).
+**`+prepend-elements+`** *(variable)* - SSE event type string for prepending child elements.
 
-`rules` is a list of `(field-name validator1 validator2 ...)` lists. Validators are called in order; the first failure stops validation for that field.
+**`+redirect+`** *(variable)* - SSE event type string for browser navigation.
 
-```lisp
-(validate params
-  (list (list "username" (required) (min-length 3))
-        (list "email"    (required) (email))))
-```
-
-### Built-in Validators
-
-Each returns a closure suitable for passing to `validate`. All accept an optional custom error message as their last argument.
-
-**`required (&optional message)`** - field must be present and non-empty.
-
-**`min-length (n &optional message)`** - string must be at least N characters.
-
-**`max-length (n &optional message)`** - string must be at most N characters.
-
-**`matches-pattern (regex &optional message)`** - string must match a CL-PPCRE regex.
-
-**`email (&optional message)`** - value must look like an email address.
-
-**`integer-string (&optional message)`** - value must parse as an integer.
-
-**`number-string (&optional message)`** - value must parse as a number.
-
-**`one-of (choices &optional message)`** - value must be one of the strings in `choices`.
-
-**`predicate (fn &optional message)`** - custom predicate. `fn` takes a value and returns T if valid.
-
-**`confirmed (params confirm-field &optional message)`** - value must match the value of another field. Useful for password confirmation.
-
-### Error Feedback
-
-**`validation-error-events (result &key selector-fn class)`** - generate SSE patch events for each errored field. Returns a list of events suitable for returning from an action handler.
-
-- `:selector-fn` - function `(field-name) -> CSS-selector`. Default: `"#error-{field}"`.
-- `:class` - CSS class for the error span (default `"field-error"`).
-
-**`clear-error-events (fields &key selector-fn)`** - generate SSE patch events to clear error messages for the given field name strings.
+**`+remove-elements+`** *(variable)* - SSE event type string for DOM element removal.
 
 ---
 
-## Client (`fluxion.client`)
+## Render - HTML page rendering helpers
 
-**`build-client (&key output-path)`** - compile the Parenscript runtime to JavaScript and write it to `output-path` (defaults to `static/fluxion.js`).
+Package: `fluxion.render`
+
+### Functions
+
+**`csrf-meta-tag (token)`** - Return an HTML meta tag containing the CSRF token.
+The client runtime reads this and includes it in every POST request.
+
+**`fluxion-script-tag (&key (path /static/fluxion.js))`** - Return an HTML <script> tag that loads the Fluxion client runtime.
+
+**`render-page (&key title body-html head-html csrf-token (script-path /static/fluxion.js))`** - Render a full HTML page shell with the Fluxion client runtime included.
+TITLE is the page title.
+BODY-HTML is a string of HTML to place in the <body>.
+HEAD-HTML is optional extra HTML for the <head>.
+CSRF-TOKEN is the session's CSRF token (included as a meta tag).
+SCRIPT-PATH is the URL path to fluxion.js.
+
+**`render-to-string (component)`** - Call the RENDER generic function on COMPONENT and return the HTML string.
 
 ---
 
-## Umbrella Package (`fluxion` / `fx`)
+## Validation - server-side form validation
 
-The `fluxion` package (nicknamed `fx`) re-exports the most commonly used symbols from all sub-packages. You can use `fluxion:defcomponent`, `fluxion:push-event`, etc. without importing individual packages.
+Package: `fluxion.validation`
+
+### Class: `validation-result`
+
+Container for validation errors from a set of rules.
+
+Slots:
+
+- **`errors`** - Hash table mapping field name strings to error message strings.
+
+### Functions
+
+**`add-error (result field message)`** - Add an error MESSAGE for FIELD to RESULT. Only the first error per field is kept.
+
+**`clear-error-events (fields &key (selector-fn nil))`** - Generate SSE patch events to clear error messages for FIELDS.
+FIELDS is a list of field name strings.
+SELECTOR-FN works the same as in VALIDATION-ERROR-EVENTS.
+
+**`confirmed (params confirm-field &optional message)`** - Validator: value must match the value of CONFIRM-FIELD in PARAMS.
+Useful for password confirmation.
+
+**`email (&optional message)`** - Validator: value must look like an email address.
+
+**`errors-alist (result)`** - Return the errors as an alist of (field . message) pairs.
+
+**`errors-plist (result)`** - Return the errors as a plist (:field message ...).
+
+**`field-error (result field)`** - Return the error message for FIELD, or NIL if the field is valid.
+
+**`integer-string (&optional message)`** - Validator: value must be a string that parses as an integer.
+
+**`make-validation-result ()`** - Create an empty validation result.
+
+**`matches-pattern (regex &optional message)`** - Validator: string must match REGEX (a CL-PPCRE pattern).
+Returns the error message if the value does not match.
+
+**`max-length (n &optional message)`** - Validator: string must be at most N characters.
+
+**`min-length (n &optional message)`** - Validator: string must be at least N characters.
+
+**`number-string (&optional message)`** - Validator: value must be a string that parses as a number.
+
+**`one-of (choices &optional message)`** - Validator: value must be one of CHOICES (list of strings).
+
+**`predicate (fn &optional message)`** - Validator: custom predicate. FN takes a value and returns T if valid.
+
+**`required (&optional message)`** - Validator: field must be present and non-empty.
+
+**`valid-p (result)`** - Return T if RESULT has no validation errors.
+
+**`validate (params rules)`** - Validate PARAMS (an alist) against RULES.
+RULES is a list of (field-name validator1 validator2 ...) lists.
+FIELD-NAME is a string matching a key in PARAMS.
+Each validator is a function returned by required, min-length, etc.
+
+Returns a VALIDATION-RESULT. Use VALID-P to check if validation passed.
+
+Example:
+  (validate params
+    (list (list "username" (required) (min-length 3))
+          (list "email"    (required) (email))))
+
+**`validation-error-events (result &key (selector-fn nil) (class field-error))`** - Generate SSE patch events to display validation errors in the DOM.
+For each field with an error, patches an element with the error message.
+
+SELECTOR-FN is an optional function (field-name) -> CSS selector.
+Defaults to "#error-{field-name}".
+
+CLASS is the CSS class added to the error element (default: "field-error").
+
+Returns a list of SSE events suitable for returning from an action handler.
+
+---
+

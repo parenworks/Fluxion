@@ -14,6 +14,8 @@ Browser <---> Reverse Proxy (nginx/Caddy) <---> Fluxion (Woo on port 5000)
 
 The reverse proxy handles TLS, serves cached static files, and forwards requests to Woo (or Hunchentoot). The critical thing is that SSE connections on `/sse` must be passed through without buffering.
 
+Fluxion spawns a dedicated thread per SSE connection so Woo's event loop stays free for regular requests. On Hunchentoot this frees the request thread back to the pool. Both backends support hundreds of concurrent SSE connections without blocking action processing.
+
 ## Building for Production
 
 ```lisp

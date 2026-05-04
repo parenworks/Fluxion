@@ -13,6 +13,14 @@
   (let ((s (make-instance 'fluxion.server:session :id "abc123")))
     (is (string= "abc123" (fluxion.server:session-id s)))))
 
+(test session-id-generation
+  "Generated session IDs are 32 hex chars from CSPRNG."
+  (let* ((id1 (fluxion.server::generate-session-id))
+         (id2 (fluxion.server::generate-session-id)))
+    (is (= 32 (length id1)))
+    (is-true (every (lambda (c) (or (digit-char-p c) (find c "abcdef"))) id1))
+    (is (not (string= id1 id2)))))
+
 (test session-component-storage
   "Components can be stored and retrieved from a session."
   (let ((s (make-instance 'fluxion.server:session :id "test"))
@@ -52,6 +60,42 @@
     (fluxion.server::close-event-queue q)
     (is-true (fluxion.server::eq-closed-p q))))
 
+(test event-queue-bounded-drops-oldest
+  "A bounded queue drops the oldest event when full."
+  (let ((q (fluxion.server::make-event-queue :max-size 3)))
+    (fluxion.server::enqueue-event q :a)
+    (fluxion.server::enqueue-event q :b)
+    (fluxion.server::enqueue-event q :c)
+    ;; Queue is full, next enqueue drops :a
+    (fluxion.server::enqueue-event q :d)
+    (let ((events (fluxion.server::dequeue-all-events q :timeout 0)))
+      (is (equal '(:b :c :d) events)))))
+
+(test event-queue-bounded-count-accurate
+  "The event count tracks enqueues, drops, and drains correctly."
+  (let ((q (fluxion.server::make-event-queue :max-size 2)))
+    (is (= 0 (fluxion.server::eq-count q)))
+    (fluxion.server::enqueue-event q :a)
+    (is (= 1 (fluxion.server::eq-count q)))
+    (fluxion.server::enqueue-event q :b)
+    (is (= 2 (fluxion.server::eq-count q)))
+    ;; Overflow: drops :a, count stays at max
+    (fluxion.server::enqueue-event q :c)
+    (is (= 2 (fluxion.server::eq-count q)))
+    ;; Drain resets to 0
+    (fluxion.server::dequeue-all-events q :timeout 0)
+    (is (= 0 (fluxion.server::eq-count q)))))
+
+(test event-queue-unbounded
+  "A queue with max-size NIL never drops events."
+  (let ((q (fluxion.server::make-event-queue :max-size nil)))
+    (dotimes (i 100)
+      (fluxion.server::enqueue-event q i))
+    (let ((events (fluxion.server::dequeue-all-events q :timeout 0)))
+      (is (= 100 (length events)))
+      (is (= 0 (first events)))
+      (is (= 99 (car (last events)))))))
+
 (test event-queue-threaded
   "Events enqueued from another thread are received."
   (let ((q (fluxion.server::make-event-queue))
@@ -68,13 +112,16 @@
 ;;; -------------------------------------------------------
 
 (test session-event-queue-lazy-creation
-  "Event queue is nil by default, created by ensure-event-queue."
+  "Event queue is nil by default, created by ensure-event-queue.
+Each call creates a fresh queue, closing the previous one for SSE reconnect safety."
   (let ((s (make-instance 'fluxion.server:session :id "test")))
     (is (null (fluxion.server::session-event-queue s)))
-    (let ((q (fluxion.server::ensure-event-queue s)))
-      (is (not (null q)))
-      ;; Second call returns the same queue
-      (is (eq q (fluxion.server::ensure-event-queue s))))))
+    (let ((q1 (fluxion.server::ensure-event-queue s)))
+      (is (not (null q1)))
+      ;; Second call creates a new queue and closes the old one
+      (let ((q2 (fluxion.server::ensure-event-queue s)))
+        (is (not (eq q1 q2)))
+        (is-true (fluxion.server::eq-closed-p q1))))))
 
 (test push-event-to-session
   "push-event adds events to the session's queue."
@@ -106,10 +153,12 @@
 ;;; -------------------------------------------------------
 
 (test csrf-token-generated
-  "Sessions are created with a CSRF token."
-  (let ((s (make-instance 'fluxion.server:session :id "csrf-test")))
-    (is (stringp (fluxion.server:session-csrf-token s)))
-    (is (> (length (fluxion.server:session-csrf-token s)) 0))))
+  "Sessions are created with a CSRF token (32 hex chars from CSPRNG)."
+  (let* ((s (make-instance 'fluxion.server:session :id "csrf-test"))
+         (token (fluxion.server:session-csrf-token s)))
+    (is (stringp token))
+    (is (= 32 (length token)))
+    (is-true (every (lambda (c) (or (digit-char-p c) (find c "abcdef"))) token))))
 
 (test csrf-token-unique
   "Each session gets a unique CSRF token."

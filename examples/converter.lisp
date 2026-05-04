@@ -6,6 +6,9 @@
 ;;;;   - Type in either field, the other updates automatically
 ;;;;   - CL's exact rational arithmetic means perfect convergence
 ;;;;   - No floating-point oscillation in the bidirectional loop
+;;;;   - data-debounce for input throttling
+;;;;   - data-disable-during-request on preset buttons
+;;;;   - Router-based page serving
 ;;;;
 ;;;; Usage:
 ;;;;   (ql:quickload :fluxion/examples)
@@ -13,7 +16,7 @@
 ;;;;   ;; Open http://localhost:5000
 
 (defpackage #:fluxion.examples.converter
-  (:use #:cl)
+  (:use #:cl #:fluxion)
   (:export #:start-converter
            #:stop-converter))
 
@@ -42,7 +45,7 @@
 ;;; Component
 ;;; -------------------------------------------------------
 
-(defclass converter (fluxion.components:component)
+(defclass converter (component)
   ((celsius-cell    :accessor converter-celsius-cell)
    (fahrenheit-cell :accessor converter-fahrenheit-cell)
    (c-to-f          :accessor converter-c-to-f)
@@ -50,29 +53,29 @@
   (:default-initargs :id "converter"))
 
 (defmethod initialize-instance :after ((c converter) &key)
-  (let ((celsius    (fluxion.cells:make-cell 0   :name "celsius"))
-        (fahrenheit (fluxion.cells:make-cell 32  :name "fahrenheit")))
+  (let ((celsius    (make-cell 0   :name "celsius"))
+        (fahrenheit (make-cell 32  :name "fahrenheit")))
     (setf (converter-celsius-cell c) celsius)
     (setf (converter-fahrenheit-cell c) fahrenheit)
     ;; Bidirectional propagators
     (setf (converter-c-to-f c)
-          (fluxion.cells:make-propagator
+          (make-propagator
            :name "c-to-f"
            :inputs (list celsius)
            :fn (lambda (c) (+ (* c 9/5) 32))
            :outputs (list fahrenheit)))
     (setf (converter-f-to-c c)
-          (fluxion.cells:make-propagator
+          (make-propagator
            :name "f-to-c"
            :inputs (list fahrenheit)
            :fn (lambda (f) (* (- f 32) 5/9))
            :outputs (list celsius)))))
 
-(defmethod fluxion.components:render ((c converter))
-  (let ((celsius (fluxion.cells:cell-value (converter-celsius-cell c)))
-        (fahrenheit (fluxion.cells:cell-value (converter-fahrenheit-cell c))))
+(defmethod render ((c converter))
+  (let ((celsius (cell-value (converter-celsius-cell c)))
+        (fahrenheit (cell-value (converter-fahrenheit-cell c))))
     (spinneret:with-html-string
-      (:div :id (fluxion.components:component-id c)
+      (:div :id (component-id c)
             :class "converter-component"
         (:h2 "Temperature Converter")
         (:p :class "subtitle" "Bidirectional propagation with exact rational arithmetic")
@@ -82,6 +85,7 @@
             (:input :type "text"
                     :value (format-temp celsius)
                     :data-on-input "/action/converter/set-celsius"
+                    :data-debounce "300"
                     :placeholder "Enter Celsius"))
           (:div :class "field-arrow"
             (:raw (format nil "&#8596;")))
@@ -90,6 +94,7 @@
             (:input :type "text"
                     :value (format-temp fahrenheit)
                     :data-on-input "/action/converter/set-fahrenheit"
+                    :data-debounce "300"
                     :placeholder "Enter Fahrenheit")))
         (:p :class "result"
             (format nil "~A C = ~A F" (format-temp celsius) (format-temp fahrenheit)))
@@ -97,36 +102,39 @@
           (:span "Presets: ")
           (:button :data-on-click "/action/converter/set-celsius"
                    :data-param-value "0"
+                   :data-disable-during-request t
                    "Freezing")
           (:button :data-on-click "/action/converter/set-celsius"
                    :data-param-value "100"
+                   :data-disable-during-request t
                    "Boiling")
           (:button :data-on-click "/action/converter/set-fahrenheit"
                    :data-param-value "98.6"
+                   :data-disable-during-request t
                    "Body temp"))))))
 
 ;;; -------------------------------------------------------
 ;;; Actions
 ;;; -------------------------------------------------------
 
-(fluxion.components:defaction converter :set-celsius (c params)
+(defaction converter :set-celsius (c params)
   (let ((v (parse-number (cdr (assoc :value params)))))
     (when v
-      (setf (fluxion.cells:cell-value (converter-celsius-cell c)) v)))
+      (setf (cell-value (converter-celsius-cell c)) v)))
   nil)
 
-(fluxion.components:defaction converter :set-fahrenheit (c params)
+(defaction converter :set-fahrenheit (c params)
   (let ((v (parse-number (cdr (assoc :value params)))))
     (when v
-      (setf (fluxion.cells:cell-value (converter-fahrenheit-cell c)) v)))
+      (setf (cell-value (converter-fahrenheit-cell c)) v)))
   nil)
 
 ;;; -------------------------------------------------------
 ;;; Page
 ;;; -------------------------------------------------------
 
-(defun render-converter-page (converter &key csrf-token)
-  (fluxion.render:render-page
+(defun render-converter-page (conv &key csrf-token)
+  (render-page
    :title "Fluxion Temperature Converter"
    :csrf-token csrf-token
    :body-html
@@ -151,48 +159,50 @@
        .presets button { padding: 0.4rem 0.8rem; border: 1px solid #585b70; border-radius: 4px;
                          background: #45475a; color: #cdd6f4; cursor: pointer; margin-left: 0.3rem; }
        .presets button:hover { background: #585b70; }
+       .presets button:disabled { opacity: 0.5; cursor: not-allowed; }
        h1 { color: #89b4fa; }
        h2 { color: #cdd6f4; }
        p { color: #bac2de; }
      </style>
      <h1>Fluxion</h1>
      <p>Propagator-inspired reactive dependency graph.</p>"
-    (fluxion.components:render converter))))
+    (render conv))))
 
 ;;; -------------------------------------------------------
-;;; Application setup
+;;; Application setup (router-based)
 ;;; -------------------------------------------------------
 
 (defvar *app* nil)
+(defvar *router* (make-router))
+
+(defroute *router* :get "/" (app session env &key params)
+  (declare (ignore app env params))
+  (let ((conv (session-component session "converter")))
+    (list 200
+          '(:content-type "text/html")
+          (list (render-converter-page conv
+                 :csrf-token (session-csrf-token session))))))
 
 (defun start-converter (&key (port 5000))
   (when *app*
-    (fluxion.server:stop *app*))
+    (stop *app*))
 
-  (setf *app* (fluxion.server:make-fluxion-app
+  (setf *app* (make-fluxion-app
                :port port
                :static-dir (asdf:system-relative-pathname "fluxion" "static/")))
 
-  (fluxion.server:register-component-factory *app* "converter"
+  (register-component-factory *app* "converter"
     (lambda () (make-instance 'converter)))
 
   (fluxion.client:build-client)
 
-  (fluxion.server:start *app*
-    (lambda (app session env)
-      (declare (ignore app env))
-      (let ((converter (fluxion.server:session-component session "converter")))
-        (list 200
-              '(:content-type "text/html")
-              (list (render-converter-page converter
-                     :csrf-token (fluxion.server:session-csrf-token session))))))
-    :port port)
+  (start *app* (router-handler *router*) :port port)
 
   (format t "~%Fluxion converter example running at http://localhost:~D~%" port)
   *app*)
 
 (defun stop-converter ()
   (when *app*
-    (fluxion.server:stop *app*)
+    (stop *app*)
     (setf *app* nil)
     (format t "Fluxion converter stopped.~%")))

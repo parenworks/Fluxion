@@ -93,7 +93,7 @@
       (when (or (not (= (@ old-node node-type) (@ new-node node-type)))
                 (and (= (@ old-node node-type) 1)
                      (not (string= (@ old-node tag-name) (@ new-node tag-name)))))
-        (chain (@ old-node parent-node) (replace-child new-node old-node))
+        (chain (@ old-node parent-node) (replace-child (chain new-node (clone-node t)) old-node))
         (return-from fluxion-morph-nodes))
 
       ;; Text or comment nodes - just update content
@@ -110,7 +110,9 @@
 
     (defun fluxion-sync-attrs (old-el new-el)
       "Synchronise attributes from NEW-EL onto OLD-EL.
-Skips the value attribute on the currently focused element to preserve user input."
+Skips the value attribute on the currently focused element to preserve user input.
+Also syncs the DOM value property on non-focused inputs so displayed values update
+even after user interaction (setAttribute alone does not update the display)."
       (let ((is-focused (= old-el (@ document active-element)))
             (old-attrs (create))
             (i 0))
@@ -128,7 +130,14 @@ Skips the value attribute on the currently focused element to preserve user inpu
               ;; Skip value on focused input to preserve cursor/selection
               (unless (and is-focused (string= name "value"))
                 (when (not (string= (chain old-el (get-attribute name)) val))
-                  (chain old-el (set-attribute name val))))
+                  (chain old-el (set-attribute name val)))
+                ;; Sync the DOM property for value on non-focused inputs
+                (when (and (string= name "value")
+                           (or (string= (@ old-el tag-name) "INPUT")
+                               (string= (@ old-el tag-name) "TEXTAREA")
+                               (string= (@ old-el tag-name) "SELECT"))
+                           (not (string= (@ old-el value) val)))
+                  (setf (@ old-el value) val)))
               (delete (getprop old-attrs name))))
           (incf i))
         ;; Remove attributes not in new element
@@ -360,6 +369,7 @@ ROOT defaults to document."
       (let ((root (or root document)))
 
         ;; data-on-click=\"/path\"
+        ;; data-disable-during-request - disables element while request is in flight
         (let ((click-els (chain root (query-selector-all "[data-on-click]"))))
           (chain click-els (for-each
                             (lambda (el)
@@ -368,11 +378,17 @@ ROOT defaults to document."
                                                               (lambda (e)
                                                                 (chain e (prevent-default))
                                                                 (let ((action-url (chain el (get-attribute "data-on-click")))
-                                                                      (confirm-msg (chain el (get-attribute "data-confirm"))))
+                                                                      (confirm-msg (chain el (get-attribute "data-confirm")))
+                                                                      (should-disable (chain el (has-attribute "data-disable-during-request"))))
                                                                   (when (or (not confirm-msg)
                                                                             (chain window (confirm confirm-msg)))
+                                                                    (when should-disable
+                                                                      (setf (@ el disabled) t))
                                                                     (fluxion-post action-url
-                                                                                  (fluxion-merge-body el)))))))
+                                                                                  (fluxion-merge-body el)
+                                                                                  (when should-disable
+                                                                                    (lambda ()
+                                                                                      (setf (@ el disabled) false)))))))))
                                 (setf (@ el _fluxion-click-bound) t))))))
 
         ;; data-on-submit=\"/path\"
@@ -426,17 +442,33 @@ ROOT defaults to document."
                                                                         (fluxion-post action-url body))))))
                                     (setf (@ el _fluxion-keydown-bound) t)))))))
 
-        ;; data-on-input=\"/path\" - fires on each input keystroke
+        ;; data-on-input=\"/path\" - fires on input (with optional debounce)
+        ;; data-debounce=\"300\" - debounce delay in ms (default: no debounce)
         (let ((input-els (chain root (query-selector-all "[data-on-input]"))))
           (chain input-els (for-each
                             (lambda (el)
                               (unless (@ el _fluxion-input-bound)
-                                (let ((action-url (chain el (get-attribute "data-on-input"))))
-                                  (chain el (add-event-listener "input"
-                                                                (lambda (e)
-                                                                  (let ((body (fluxion-merge-body el)))
-                                                                    (setf (getprop body "value") (@ el value))
-                                                                    (fluxion-post action-url body)))))
+                                (let ((action-url (chain el (get-attribute "data-on-input")))
+                                      (debounce-ms (parse-int (or (chain el (get-attribute "data-debounce")) "0") 10)))
+                                  (if (and debounce-ms (> debounce-ms 0))
+                                      ;; Debounced: delay POST until user stops typing
+                                      (chain el (add-event-listener "input"
+                                                                    (lambda (e)
+                                                                      (when (@ el _fluxion-debounce-timer)
+                                                                        (clear-timeout (@ el _fluxion-debounce-timer)))
+                                                                      (setf (@ el _fluxion-debounce-timer)
+                                                                            (set-timeout
+                                                                             (lambda ()
+                                                                               (let ((body (fluxion-merge-body el)))
+                                                                                 (setf (getprop body "value") (@ el value))
+                                                                                 (fluxion-post action-url body)))
+                                                                             debounce-ms)))))
+                                      ;; No debounce: fire immediately
+                                      (chain el (add-event-listener "input"
+                                                                    (lambda (e)
+                                                                      (let ((body (fluxion-merge-body el)))
+                                                                        (setf (getprop body "value") (@ el value))
+                                                                        (fluxion-post action-url body))))))
                                   (setf (@ el _fluxion-input-bound) t)))))))
 
         ;; data-bind=\"signal-name\" - two-way binding for inputs

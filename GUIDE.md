@@ -35,14 +35,12 @@ The `static/fluxion.js` file is compiled from Parenscript by calling `(fluxion.c
 ### Basic Component
 
 ```lisp
-(fluxion.components:defcomponent greeting ()
-  ((name :initarg :name :accessor greeting-name))
-  (:default-initargs :id "greeting"))
-
-(defmethod fluxion.components:render ((g greeting))
-  (spinneret:with-html-string
-    (:div :id (fluxion.components:component-id g)
-      (:h1 (format nil "Hello, ~A!" (greeting-name g))))))
+(fluxion.components:defcomponent greeting
+  :id "greeting"
+  :slots ((name :initarg :name :accessor greeting-name))
+  :render (spinneret:with-html-string
+            (:div :id (component-id self)
+              (:h1 (format nil "Hello, ~A!" (greeting-name self))))))
 ```
 
 ### Cell-Backed Component (Reactive)
@@ -50,15 +48,13 @@ The `static/fluxion.js` file is compiled from Parenscript by calling `(fluxion.c
 Cell-backed slots automatically trigger patches when their values change. No manual dirty-tracking needed.
 
 ```lisp
-(fluxion.components:defcomponent counter ()
-  ((count :cell t :initform 0 :accessor counter-count))
-  (:default-initargs :id "counter"))
-
-(defmethod fluxion.components:render ((c counter))
-  (spinneret:with-html-string
-    (:div :id (fluxion.components:component-id c)
-      (:p (format nil "Count: ~D" (counter-count c)))
-      (:button :data-on-click "/action/counter/increment" "+1"))))
+(fluxion.components:defcomponent counter
+  :id "counter"
+  :slots ((count :cell t :initform 0 :accessor counter-count))
+  :render (spinneret:with-html-string
+            (:div :id (component-id self)
+              (:p (format nil "Count: ~D" (counter-count self)))
+              (:button :data-on-click "/action/counter/increment" "+1"))))
 
 (fluxion.components:defaction counter :increment (c)
   (incf (counter-count c))
@@ -92,6 +88,38 @@ Computed cells derive their value from other cells and recompute automatically.
   ;; Changing first-name automatically recomputes full-name.
   (setf (fluxion.cells:cell-value first-name) "Jane"))
 ```
+
+---
+
+## Client Behaviour Attributes
+
+### Debouncing Input Events
+
+For live-as-you-type inputs (sliders, text fields), use `data-debounce` to throttle the frequency of POST requests. The value is in milliseconds:
+
+```lisp
+(:input :type "range"
+        :data-on-input "/action/picker/set-red"
+        :data-debounce "16")  ; ~60fps
+```
+
+Lower values feel more responsive but generate more server traffic. Good defaults:
+
+- **5-16ms** for sliders (near-realtime feedback)
+- **150-300ms** for text search/autocomplete
+- **No debounce** for discrete events (click, submit, keydown with data-key)
+
+### Disabling During Request
+
+Prevent double-clicks by disabling the element while the POST is in flight:
+
+```lisp
+(:button :data-on-click "/action/order/submit"
+         :data-disable-during-request t
+         "Place Order")
+```
+
+The button is disabled immediately on click, then re-enabled when the server responds. Works with any `data-on-click` element.
 
 ---
 
@@ -485,3 +513,5 @@ These can be exposed to Prometheus, Grafana, or any monitoring system by adding 
 **Computed cell not recomputing:** Dependencies are tracked by which cells are read during the compute function. If you read a cell conditionally, it won't be tracked on runs where the branch isn't taken. Keep compute functions deterministic in their reads.
 
 **Woo won't start:** Install libev: `sudo apt install libev-dev`. Then `(ql:quickload "clack-handler-woo")`.
+
+**Slider/input values not updating on morph:** The DOM `value` property diverges from the HTML `value` attribute after user interaction. Fluxion's morph syncs both the attribute and the property on non-focused inputs. If you see stale values, ensure you are using the latest `fluxion.js` build.

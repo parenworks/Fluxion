@@ -147,9 +147,9 @@
    #:register-action
    #:start
    #:stop
-   #:with-event-stream
    #:patch
    #:send-event
+   #:*current-session*
    #:session
    #:session-id
    #:session-component
@@ -184,6 +184,8 @@
    #:session-expired-p
    #:close-event-queue
    #:ensure-event-queue
+   #:session-event-queue
+   #:eq-closed-p
    #:start-session-reaper
    #:stop-session-reaper
    #:app-request-log
@@ -193,98 +195,89 @@
    #:app-sse-connection-count
    #:health-response
    #:log-request
-   #:format-log-timestamp))
+   #:format-log-timestamp
+   ;; Conditions
+   #:fluxion-error
+   #:fluxion-error-message
+   #:session-not-found
+   #:session-not-found-id
+   #:csrf-validation-error
+   #:action-dispatch-error
+   #:action-dispatch-error-path
+   #:action-dispatch-error-cause
+   #:component-not-found
+   #:component-not-found-id
+   #:request-parse-error))
 
 (defpackage #:fluxion
   (:use #:cl)
   (:nicknames #:fx)
-  (:export
-   ;; Re-export key symbols from sub-packages
-   ;; Components
-   #:component
-   #:component-id
-   #:render
-   #:handle-action
-   #:defaction
-   #:patch-component
-   #:mark-dirty
-   #:clear-dirty
-   ;; Server
-   #:fluxion-app
-   #:make-fluxion-app
-   #:register-component
-   #:register-component-factory
-   #:register-action
-   #:start
-   #:stop
-   #:patch
-   #:send-event
-   #:with-event-stream
-   #:session
-   #:session-component
-   #:session-csrf-token
-   #:session-user
-   #:session-user-roles
-   #:authenticated-p
-   #:authenticate
-   #:logout
-   #:has-role-p
-   #:require-auth
-   #:require-role
-   #:router
-   #:make-router
-   #:add-route
-   #:defroute
-   #:dispatch-route
+  (:import-from #:fluxion.components
+   #:component #:component-id #:render #:handle-action #:defaction
+   #:defcomponent #:patch-component #:mark-dirty #:clear-dirty
+   #:component-selector)
+  (:import-from #:fluxion.server
+   #:fluxion-app #:make-fluxion-app
+   #:register-component #:register-component-factory #:register-action
+   #:start #:stop #:patch #:send-event
+   #:session #:session-component #:session-csrf-token
+   #:session-user #:session-user-roles
+   #:authenticated-p #:authenticate #:logout #:has-role-p
+   #:require-auth #:require-role
+   #:router #:make-router #:add-route #:defroute #:dispatch-route
    #:router-handler
-   #:push-event
-   #:push-events
-   #:push-component-patch
+   #:push-event #:push-events #:push-component-patch
+   #:find-component #:*current-session*
+   #:app-handler #:app-sessions #:app-session-lock)
+  (:import-from #:fluxion.events
+   #:make-patch-event #:make-remove-event #:make-append-event
+   #:make-prepend-event #:make-signal-event #:make-script-event
+   #:make-redirect-event)
+  (:import-from #:fluxion.cells
+   #:cell #:make-cell #:cell-value #:cell-name
+   #:watch #:unwatch #:connect #:disconnect
+   #:computed-cell #:make-computed #:recompute
+   #:propagator #:make-propagator #:fire-propagator #:remove-propagator
+   #:with-cell-lock #:with-transaction)
+  (:import-from #:fluxion.render
+   #:render-to-string #:render-page #:fluxion-script-tag #:csrf-meta-tag)
+  (:import-from #:fluxion.protocol
+   #:format-sse-event #:write-sse-event)
+  (:import-from #:fluxion.validation
+   #:validate #:valid-p #:field-error #:errors-alist
+   #:validation-error-events #:clear-error-events)
+  (:export
    ;; Components
-   #:defcomponent
+   #:component #:component-id #:component-selector
+   #:render #:handle-action #:defaction #:defcomponent
+   #:patch-component #:mark-dirty #:clear-dirty
+   ;; Server
+   #:fluxion-app #:make-fluxion-app
+   #:register-component #:register-component-factory #:register-action
+   #:start #:stop #:patch #:send-event
+   #:session #:session-component #:session-csrf-token
+   #:session-user #:session-user-roles
+   #:authenticated-p #:authenticate #:logout #:has-role-p
+   #:require-auth #:require-role
+   #:router #:make-router #:add-route #:defroute #:dispatch-route
+   #:router-handler
+   #:push-event #:push-events #:push-component-patch
+   #:find-component #:*current-session*
+   #:app-handler #:app-sessions #:app-session-lock
    ;; Events
-   #:make-patch-event
-   #:make-remove-event
-   #:make-append-event
-   #:make-prepend-event
-   #:make-signal-event
-   #:make-script-event
+   #:make-patch-event #:make-remove-event #:make-append-event
+   #:make-prepend-event #:make-signal-event #:make-script-event
    #:make-redirect-event
-   ;; Signals
-   #:signal-store
-   #:make-signal-store
-   #:get-signal
-   #:set-signal
    ;; Cells
-   #:cell
-   #:make-cell
-   #:cell-value
-   #:cell-name
-   #:watch
-   #:unwatch
-   #:connect
-   #:disconnect
-   #:computed-cell
-   #:make-computed
-   #:recompute
-   #:propagator
-   #:make-propagator
-   #:fire-propagator
-   #:remove-propagator
-   ;; Thread safety
-   #:with-cell-lock
+   #:cell #:make-cell #:cell-value #:cell-name
+   #:watch #:unwatch #:connect #:disconnect
+   #:computed-cell #:make-computed #:recompute
+   #:propagator #:make-propagator #:fire-propagator #:remove-propagator
+   #:with-cell-lock #:with-transaction
    ;; Render
-   #:render-to-string
-   #:render-page
-   #:fluxion-script-tag
-   #:csrf-meta-tag
+   #:render-to-string #:render-page #:fluxion-script-tag #:csrf-meta-tag
    ;; Protocol
-   #:format-sse-event
-   #:write-sse-event
+   #:format-sse-event #:write-sse-event
    ;; Validation
-   #:validate
-   #:valid-p
-   #:field-error
-   #:errors-alist
-   #:validation-error-events
-   #:clear-error-events))
+   #:validate #:valid-p #:field-error #:errors-alist
+   #:validation-error-events #:clear-error-events))

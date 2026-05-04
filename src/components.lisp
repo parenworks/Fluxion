@@ -10,6 +10,18 @@
 ;;; component has a unique ID (used as the DOM element ID)
 ;;; and an optional signal store for client-side state.
 
+(defgeneric component-id (component)
+  (:documentation "Unique identifier string, used as the DOM element ID and CSS selector target."))
+
+(defgeneric component-signals (component)
+  (:documentation "Optional signal-store for this component's client-side reactive state."))
+
+(defgeneric component-dirty-p (component)
+  (:documentation "Whether this component needs re-rendering. Set by mark-dirty, cleared by patch-component."))
+
+(defgeneric component-last-html (component)
+  (:documentation "Cached HTML from the last render. Used for dirty comparison to avoid sending no-op patches."))
+
 (defclass component ()
   ((id      :initarg :id
             :accessor component-id
@@ -112,7 +124,8 @@ Example:
     :render (spinneret:with-html-string
               (:div :id (component-id self)
                 (:p (format nil \"Count: ~D\" (counter-count self))))))"
-  (let* ((self-sym (intern "SELF" *package*))
+  (let* ((self-gensym (gensym "SELF-"))
+         (self-sym (intern "SELF" *package*))
          (id-form (or id (string-downcase (symbol-name name))))
          (cell-slots (remove-if-not (lambda (s) (getf (cdr s) :cell)) slots))
          (plain-slots (remove-if (lambda (s) (getf (cdr s) :cell)) slots))
@@ -178,14 +191,17 @@ Example:
        ,@cell-accessors
 
        ,@(when render
-           `((defmethod render ((,self-sym ,name))
-               ,render))))))
+           `((defmethod render ((,self-gensym ,name))
+               (symbol-macrolet ((,self-sym ,self-gensym))
+                 ,render)))))))
 
-(defun patch-component (component &key (mode "morph") force)
-  "Return a list containing a single patch event for COMPONENT.
+(defgeneric patch-component (component &key mode force)
+  (:documentation "Return a list containing a single patch event for COMPONENT.
 Re-renders the component and targets its DOM selector.
 If the rendered HTML is identical to the cached version and FORCE
-is NIL, returns an empty list (no patch sent)."
+is NIL, returns an empty list (no patch sent)."))
+
+(defmethod patch-component ((component component) &key (mode "morph") force)
   (let ((new-html (render component)))
     (cond
       ((and (not force)

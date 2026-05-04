@@ -6,6 +6,8 @@
 ;;;;   - Two propagators: RGB->HSV and HSV->RGB
 ;;;;   - Move any slider, all six values stay in sync
 ;;;;   - The colour swatch and hex code update live
+;;;;   - data-debounce on sliders for input throttling
+;;;;   - Router-based page serving
 ;;;;
 ;;;; This is the propagator network in action: changing R triggers RGB->HSV,
 ;;;; which updates H, S, V. Changing H triggers HSV->RGB, which updates R, G, B.
@@ -17,7 +19,7 @@
 ;;;;   ;; Open http://localhost:5000
 
 (defpackage #:fluxion.examples.colour-picker
-  (:use #:cl)
+  (:use #:cl #:fluxion)
   (:export #:start-colour-picker
            #:stop-colour-picker))
 
@@ -69,7 +71,7 @@ Returns a list (R G B)."
 ;;; Component
 ;;; -------------------------------------------------------
 
-(defclass colour-picker (fluxion.components:component)
+(defclass colour-picker (component)
   ((r-cell :accessor picker-r-cell)
    (g-cell :accessor picker-g-cell)
    (b-cell :accessor picker-b-cell)
@@ -83,25 +85,25 @@ Returns a list (R G B)."
 (defmethod initialize-instance :after ((cp colour-picker) &key)
   ;; Compute consistent initial values so propagators converge on first fire.
   (destructuring-bind (init-h init-s init-v) (rgb->hsv 66 135 245)
-    (let ((r (fluxion.cells:make-cell 66  :name "r"))
-          (g (fluxion.cells:make-cell 135 :name "g"))
-          (b (fluxion.cells:make-cell 245 :name "b"))
-          (h (fluxion.cells:make-cell init-h :name "h"))
-          (s (fluxion.cells:make-cell init-s :name "s"))
-          (v (fluxion.cells:make-cell init-v :name "v")))
+    (let ((r (make-cell 66  :name "r"))
+          (g (make-cell 135 :name "g"))
+          (b (make-cell 245 :name "b"))
+          (h (make-cell init-h :name "h"))
+          (s (make-cell init-s :name "s"))
+          (v (make-cell init-v :name "v")))
       (setf (picker-r-cell cp) r  (picker-g-cell cp) g  (picker-b-cell cp) b
             (picker-h-cell cp) h  (picker-s-cell cp) s  (picker-v-cell cp) v)
       ;; Bidirectional propagators: changing any RGB slider updates HSV
       ;; and vice versa. Re-entrance guards in fire-propagator prevent
       ;; infinite loops; consistent initial values prevent oscillation.
       (setf (picker-rgb->hsv cp)
-            (fluxion.cells:make-propagator
+            (make-propagator
              :name "rgb->hsv"
              :inputs (list r g b)
              :fn #'rgb->hsv
              :outputs (list h s v)))
       (setf (picker-hsv->rgb cp)
-            (fluxion.cells:make-propagator
+            (make-propagator
              :name "hsv->rgb"
              :inputs (list h s v)
              :fn #'hsv->rgb
@@ -125,18 +127,19 @@ Returns a list (R G B)."
               :max (format nil "~D" max)
               :value (format nil "~D" value)
               :class (or colour "")
-              :data-on-input action))))
+              :data-on-input action
+              :data-debounce "5"))))
 
-(defmethod fluxion.components:render ((cp colour-picker))
-  (let* ((r (fluxion.cells:cell-value (picker-r-cell cp)))
-         (g (fluxion.cells:cell-value (picker-g-cell cp)))
-         (b (fluxion.cells:cell-value (picker-b-cell cp)))
-         (h (fluxion.cells:cell-value (picker-h-cell cp)))
-         (s (fluxion.cells:cell-value (picker-s-cell cp)))
-         (v (fluxion.cells:cell-value (picker-v-cell cp)))
+(defmethod render ((cp colour-picker))
+  (let* ((r (cell-value (picker-r-cell cp)))
+         (g (cell-value (picker-g-cell cp)))
+         (b (cell-value (picker-b-cell cp)))
+         (h (cell-value (picker-h-cell cp)))
+         (s (cell-value (picker-s-cell cp)))
+         (v (cell-value (picker-v-cell cp)))
          (hex (hex-colour r g b)))
     (spinneret:with-html-string
-      (:div :id (fluxion.components:component-id cp)
+      (:div :id (component-id cp)
             :class "colour-picker"
         ;; Swatch
         (:div :class "swatch"
@@ -164,10 +167,10 @@ Returns a list (R G B)."
   (min hi (max lo val)))
 
 (defmacro def-slider-action (name cell-accessor lo hi)
-  `(fluxion.components:defaction colour-picker ,name (cp params)
+  `(defaction colour-picker ,name (cp params)
      (let ((v (parse-integer (cdr (assoc :value params)) :junk-allowed t)))
        (when v
-         (setf (fluxion.cells:cell-value (,cell-accessor cp))
+         (setf (cell-value (,cell-accessor cp))
                (clamp v ,lo ,hi))))
      nil))
 
@@ -183,7 +186,7 @@ Returns a list (R G B)."
 ;;; -------------------------------------------------------
 
 (defun render-colour-page (picker &key csrf-token)
-  (fluxion.render:render-page
+  (render-page
    :title "Fluxion Colour Picker"
    :csrf-token csrf-token
    :body-html
@@ -216,43 +219,44 @@ Returns a list (R G B)."
      </style>
      <h1>Fluxion</h1>
      <p>Bidirectional propagation: RGB and HSV stay in sync.</p>"
-    (fluxion.components:render picker))))
+    (render picker))))
 
 ;;; -------------------------------------------------------
-;;; Application setup
+;;; Application setup (router-based)
 ;;; -------------------------------------------------------
 
 (defvar *app* nil)
+(defvar *router* (make-router))
+
+(defroute *router* :get "/" (app session env &key params)
+  (declare (ignore app env params))
+  (let ((picker (session-component session "colour-picker")))
+    (list 200
+          '(:content-type "text/html")
+          (list (render-colour-page picker
+                 :csrf-token (session-csrf-token session))))))
 
 (defun start-colour-picker (&key (port 5000) (server :woo))
   (when *app*
-    (fluxion.server:stop *app*))
+    (stop *app*))
 
-  (setf *app* (fluxion.server:make-fluxion-app
+  (setf *app* (make-fluxion-app
                :port port
                :server server
                :static-dir (asdf:system-relative-pathname "fluxion" "static/")))
 
-  (fluxion.server:register-component-factory *app* "colour-picker"
+  (register-component-factory *app* "colour-picker"
     (lambda () (make-instance 'colour-picker)))
 
   (fluxion.client:build-client)
 
-  (fluxion.server:start *app*
-    (lambda (app session env)
-      (declare (ignore app env))
-      (let ((picker (fluxion.server:session-component session "colour-picker")))
-        (list 200
-              '(:content-type "text/html")
-              (list (render-colour-page picker
-                     :csrf-token (fluxion.server:session-csrf-token session))))))
-    :port port)
+  (start *app* (router-handler *router*) :port port)
 
   (format t "~%Fluxion colour picker running at http://localhost:~D~%" port)
   *app*)
 
 (defun stop-colour-picker ()
   (when *app*
-    (fluxion.server:stop *app*)
+    (stop *app*)
     (setf *app* nil)
     (format t "Fluxion colour picker stopped.~%")))

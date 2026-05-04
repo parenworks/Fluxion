@@ -13,6 +13,13 @@
            :documentation "Hash table mapping field name strings to error message strings."))
   (:documentation "Container for validation errors from a set of rules."))
 
+(defmethod print-object ((r validation-result) stream)
+  (print-unreadable-object (r stream :type t)
+    (let ((n (hash-table-count (validation-errors r))))
+      (if (zerop n)
+          (format stream "valid")
+          (format stream "~D error~:P" n)))))
+
 (defun make-validation-result ()
   "Create an empty validation result."
   (make-instance 'validation-result))
@@ -104,7 +111,10 @@ Returns the error message if the value does not match."
   (lambda (value field)
     (declare (ignore field))
     (when (and (stringp value)
-               (not (ignore-errors (read-from-string value))))
+               (not (ignore-errors
+                      (let* ((*read-eval* nil)
+                             (result (read-from-string value)))
+                        (numberp result)))))
       (or message "Must be a number"))))
 
 (defun one-of (choices &optional message)

@@ -7,17 +7,36 @@
 ;;; Event type constants
 ;;; -------------------------------------------------------
 
-(alexandria:define-constant +patch-elements+   "fluxion-patch"   :test #'equal)
-(alexandria:define-constant +remove-elements+  "fluxion-remove"  :test #'equal)
-(alexandria:define-constant +append-elements+  "fluxion-append"  :test #'equal)
-(alexandria:define-constant +prepend-elements+ "fluxion-prepend" :test #'equal)
-(alexandria:define-constant +patch-signals+    "fluxion-signals" :test #'equal)
-(alexandria:define-constant +execute-script+   "fluxion-script"  :test #'equal)
-(alexandria:define-constant +redirect+         "fluxion-redirect" :test #'equal)
+(alexandria:define-constant +patch-elements+   "fluxion-patch"   :test #'equal
+  :documentation "SSE event type string for DOM patch operations.")
+(alexandria:define-constant +remove-elements+  "fluxion-remove"  :test #'equal
+  :documentation "SSE event type string for DOM element removal.")
+(alexandria:define-constant +append-elements+  "fluxion-append"  :test #'equal
+  :documentation "SSE event type string for appending child elements.")
+(alexandria:define-constant +prepend-elements+ "fluxion-prepend" :test #'equal
+  :documentation "SSE event type string for prepending child elements.")
+(alexandria:define-constant +patch-signals+    "fluxion-signals" :test #'equal
+  :documentation "SSE event type string for updating client-side signals.")
+(alexandria:define-constant +execute-script+   "fluxion-script"  :test #'equal
+  :documentation "SSE event type string for executing JavaScript on the client.")
+(alexandria:define-constant +redirect+         "fluxion-redirect" :test #'equal
+  :documentation "SSE event type string for browser navigation.")
 
 ;;; -------------------------------------------------------
 ;;; SSE event structure
 ;;; -------------------------------------------------------
+
+(defgeneric event-type (event)
+  (:documentation "The SSE event type field (e.g. \"fluxion-patch\", \"fluxion-script\")."))
+
+(defgeneric event-data (event)
+  (:documentation "The event payload (alist), JSON-encoded when formatted."))
+
+(defgeneric event-id (event)
+  (:documentation "Optional SSE event ID. The browser uses this for reconnection (Last-Event-ID)."))
+
+(defgeneric event-retry (event)
+  (:documentation "Optional SSE retry interval in milliseconds. Tells the browser how long to wait before reconnecting."))
 
 (defclass sse-event ()
   ((event-type :initarg :type

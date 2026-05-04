@@ -4,9 +4,10 @@
 ;;;; The "hello world" of Fluxion.  Demonstrates:
 ;;;;   - defcomponent macro (one-form component definition)
 ;;;;   - Cell-backed slots with auto-patching
-;;;;   - Computed cells (auto-derived values)
 ;;;;   - Handling actions via defaction
 ;;;;   - Server-push via persistent SSE (live clock)
+;;;;   - Router-based page serving
+;;;;   - data-disable-during-request for click deduplication
 ;;;;
 ;;;; Usage:
 ;;;;   (ql:quickload :fluxion/examples)
@@ -14,7 +15,7 @@
 ;;;;   ;; Open http://localhost:5000
 
 (defpackage #:fluxion.examples.counter
-  (:use #:cl)
+  (:use #:cl #:fluxion)
   (:export #:start-counter
            #:stop-counter))
 
@@ -27,12 +28,12 @@
 ;;; defcomponent generates the class, the cell setup, the
 ;;; accessor functions, and the render method in one form.
 
-(fluxion.components:defcomponent counter
+(defcomponent counter
   :id "counter"
   :slots ((count :cell t :initform 0 :accessor counter-count))
   :render (let ((n (counter-count self)))
             (spinneret:with-html-string
-              (:div :id (fluxion.components:component-id self)
+              (:div :id (component-id self)
                     :class "counter-component"
                 (:h2 "Counter")
                 (:p :class "count-display"
@@ -41,9 +42,15 @@
                                   ((plusp n) " (positive)")
                                   (t         " (negative)"))))
                 (:div :class "counter-buttons"
-                  (:button :data-on-click "/action/counter/increment" "Increment")
-                  (:button :data-on-click "/action/counter/decrement" "Decrement")
-                  (:button :data-on-click "/action/counter/reset"     "Reset"))))))
+                  (:button :data-on-click "/action/counter/increment"
+                           :data-disable-during-request t
+                           "Increment")
+                  (:button :data-on-click "/action/counter/decrement"
+                           :data-disable-during-request t
+                           "Decrement")
+                  (:button :data-on-click "/action/counter/reset"
+                           :data-disable-during-request t
+                           "Reset"))))))
 
 ;;; -------------------------------------------------------
 ;;; Actions (via defaction - CLOS dispatch)
@@ -52,15 +59,15 @@
 ;; Actions just modify the cell - the connected watcher handles patching.
 ;; Return :no-patch to suppress defaction's default patch (the cell handles it).
 
-(fluxion.components:defaction counter :increment (c)
+(defaction counter :increment (c)
   (incf (counter-count c))
   '())
 
-(fluxion.components:defaction counter :decrement (c)
+(defaction counter :decrement (c)
   (decf (counter-count c))
   '())
 
-(fluxion.components:defaction counter :reset (c)
+(defaction counter :reset (c)
   (setf (counter-count c) 0)
   '())
 
@@ -71,40 +78,49 @@
 ;;; pushes the server time to all sessions every second.
 ;;; No user interaction triggers these updates.
 
-(fluxion.components:defcomponent server-clock
+(defcomponent server-clock
   :id "server-clock"
   :slots ((time-str :cell t :initform "" :accessor clock-time))
   :render (spinneret:with-html-string
-            (:div :id (fluxion.components:component-id self)
+            (:div :id (component-id self)
                   :class "clock-component"
               (:span :class "clock-label" "Server time: ")
               (:span :class "clock-value" (clock-time self)))))
 
 (defvar *clock-thread* nil)
+(defvar *clock-stop-flag* nil)
+
+(defun stop-clock-ticker ()
+  "Signal the clock ticker to stop and wait for it to finish."
+  (setf *clock-stop-flag* t)
+  (when (and *clock-thread* (bordeaux-threads:thread-alive-p *clock-thread*))
+    (bordeaux-threads:join-thread *clock-thread*))
+  (setf *clock-thread* nil))
 
 (defun start-clock-ticker (app)
   "Start a background thread that pushes server time to all sessions every second."
-  (when (and *clock-thread* (bordeaux-threads:thread-alive-p *clock-thread*))
-    (bordeaux-threads:destroy-thread *clock-thread*))
+  (stop-clock-ticker)
+  (setf *clock-stop-flag* nil)
   (setf *clock-thread*
         (bordeaux-threads:make-thread
          (lambda ()
            (loop
              (sleep 1)
-             (unless (fluxion.server:app-handler app)
+             (when (or *clock-stop-flag*
+                       (null (app-handler app)))
                (return))
              (handler-case
                  (let ((now (multiple-value-bind (s min h) (get-decoded-time)
                               (format nil "~2,'0D:~2,'0D:~2,'0D" h min s))))
                    ;; Push to all sessions
-                   (bordeaux-threads:with-lock-held ((fluxion.server:app-session-lock app))
+                   (bordeaux-threads:with-lock-held ((app-session-lock app))
                      (maphash (lambda (sid session)
                                 (declare (ignore sid))
-                                (let ((clock (fluxion.server:session-component session "server-clock")))
+                                (let ((clock (session-component session "server-clock")))
                                   (when clock
                                     (setf (clock-time clock) now)
-                                    (fluxion.server:push-component-patch session clock))))
-                              (fluxion.server:app-sessions app))))
+                                    (push-component-patch session clock))))
+                              (app-sessions app))))
                (error () nil))))
          :name "fluxion-clock-ticker")))
 
@@ -113,7 +129,7 @@
 ;;; -------------------------------------------------------
 
 (defun render-counter-page (counter clock &key csrf-token)
-  (fluxion.render:render-page
+  (render-page
    :title "Fluxion Counter Example"
    :csrf-token csrf-token
    :body-html
@@ -128,6 +144,7 @@
        button { padding: 0.5rem 1rem; border: 1px solid #585b70; border-radius: 4px;
                 background: #45475a; color: #cdd6f4; cursor: pointer; font-size: 1rem; }
        button:hover { background: #585b70; }
+       button:disabled { opacity: 0.5; cursor: not-allowed; }
        h1 { color: #89b4fa; }
        p { color: #bac2de; }
        .clock-component { margin-top: 1rem; padding: 0.75rem 1rem; border: 1px solid #45475a;
@@ -137,43 +154,44 @@
      </style>
      <h1>Fluxion</h1>
      <p>Live server-rendered interfaces for Common Lisp.</p>"
-    (fluxion.components:render counter)
-    (fluxion.components:render clock))))
+    (render counter)
+    (render clock))))
 
 ;;; -------------------------------------------------------
-;;; Application setup
+;;; Application setup (router-based)
 ;;; -------------------------------------------------------
 
 (defvar *app* nil)
+(defvar *router* (make-router))
+
+(defroute *router* :get "/" (app session env &key params)
+  (declare (ignore app env params))
+  (let ((counter (session-component session "counter"))
+        (clock   (session-component session "server-clock")))
+    (list 200
+          '(:content-type "text/html")
+          (list (render-counter-page counter clock
+                 :csrf-token (session-csrf-token session))))))
 
 (defun start-counter (&key (port 5000))
   (when *app*
-    (fluxion.server:stop *app*))
+    (stop *app*))
 
-  (setf *app* (fluxion.server:make-fluxion-app
+  (setf *app* (make-fluxion-app
                :port port
                :static-dir (asdf:system-relative-pathname "fluxion" "static/")))
 
   ;; Register factories so each session gets its own instances
-  (fluxion.server:register-component-factory *app* "counter"
+  (register-component-factory *app* "counter"
     (lambda () (make-instance 'counter)))
-  (fluxion.server:register-component-factory *app* "server-clock"
+  (register-component-factory *app* "server-clock"
     (lambda () (make-instance 'server-clock)))
 
   ;; Build the client runtime JS
   (fluxion.client:build-client)
 
-  ;; Start the server - page-handler now receives (app session env)
-  (fluxion.server:start *app*
-    (lambda (app session env)
-      (declare (ignore app env))
-      (let ((counter (fluxion.server:session-component session "counter"))
-            (clock   (fluxion.server:session-component session "server-clock")))
-        (list 200
-              '(:content-type "text/html")
-              (list (render-counter-page counter clock
-                     :csrf-token (fluxion.server:session-csrf-token session))))))
-    :port port)
+  ;; Start the server with the router
+  (start *app* (router-handler *router*) :port port)
 
   ;; Start the background clock ticker (server-push demo)
   (start-clock-ticker *app*)
@@ -182,7 +200,8 @@
   *app*)
 
 (defun stop-counter ()
+  (stop-clock-ticker)
   (when *app*
-    (fluxion.server:stop *app*)
+    (stop *app*)
     (setf *app* nil)
     (format t "Fluxion counter stopped.~%")))
