@@ -56,11 +56,16 @@
 
 - [ ] **Per-session cell locks** - replace global cell lock with per-session
       locks for better concurrency.
-- [ ] **Component composition/nesting** - support parent-child component trees.
-- [ ] **Middleware/hook system** - pre/post request hooks for logging, auth,
-      rate limiting, etc.
-- [ ] **Component lifecycle callbacks** - on-mount, on-unmount, on-update hooks.
-- [ ] **Multi-implementation support** - test and support CCL, ECL beyond SBCL.
+- [x] **Component composition/nesting** - parent/children/session back-pointers,
+      add-child/remove-child, component-root, find-child, propagate-session.
+      30 tests covering nesting, reparenting, session propagation, rendering.
+- [x] **Middleware/hook system** - onion-style middleware chain with add/remove/clear.
+      Built-in: request-logger, rate-limiter (token bucket), CORS. 12 tests.
+- [x] **Component lifecycle callbacks** - component-mounted, component-unmounted,
+      component-connected. Fires on factory creation, session reap, SSE connect.
+      6 tests (including end-to-end HTTP SSE verification).
+- [x] **Multi-implementation support** - CCL fully supported (365 tests pass).
+      ECL blocked by serapeum compilation failure (upstream issue).
 - [x] **Documentation generation** - tools/generate-docs.lisp introspects all
       exported symbols, extracts docstrings, slots, lambda lists, and generates
       API.md automatically. Run: (load "tools/generate-docs.lisp") (fluxion.docs:generate)

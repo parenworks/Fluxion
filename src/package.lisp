@@ -58,7 +58,20 @@
    #:component-dirty-p
    #:component-last-html
    #:mark-dirty
-   #:clear-dirty))
+   #:clear-dirty
+   ;; Lifecycle callbacks
+   #:component-mounted
+   #:component-unmounted
+   #:component-connected
+   ;; Composition
+   #:component-parent
+   #:component-children
+   #:component-session
+   #:add-child
+   #:remove-child
+   #:propagate-session
+   #:component-root
+   #:find-child))
 
 (defpackage #:fluxion.cells
   (:use #:cl)
@@ -213,7 +226,16 @@
    #:action-dispatch-error-cause
    #:component-not-found
    #:component-not-found-id
-   #:request-parse-error))
+   #:request-parse-error
+   ;; Middleware
+   #:add-middleware
+   #:remove-middleware
+   #:clear-middleware
+   #:app-middleware
+   #:wrap-handler
+   #:make-request-logger
+   #:make-rate-limiter
+   #:make-cors-middleware))
 
 (defpackage #:fluxion
   (:use #:cl)
@@ -221,7 +243,10 @@
   (:import-from #:fluxion.components
    #:component #:component-id #:render #:handle-action #:defaction
    #:defcomponent #:patch-component #:mark-dirty #:clear-dirty
-   #:component-selector)
+   #:component-selector
+   #:component-mounted #:component-unmounted #:component-connected
+   #:component-parent #:component-children #:component-session
+   #:add-child #:remove-child #:component-root #:find-child)
   (:import-from #:fluxion.server
    #:fluxion-app #:make-fluxion-app
    #:register-component #:register-component-factory #:register-action
@@ -234,7 +259,9 @@
    #:router-handler
    #:push-event #:push-events #:push-component-patch
    #:find-component #:*current-session*
-   #:app-handler #:app-sessions #:app-session-lock)
+   #:app-handler #:app-sessions #:app-session-lock
+   #:add-middleware #:remove-middleware #:clear-middleware
+   #:make-request-logger #:make-rate-limiter #:make-cors-middleware)
   (:import-from #:fluxion.events
    #:make-patch-event #:make-remove-event #:make-append-event
    #:make-prepend-event #:make-signal-event #:make-script-event
@@ -257,6 +284,10 @@
    #:component #:component-id #:component-selector
    #:render #:handle-action #:defaction #:defcomponent
    #:patch-component #:mark-dirty #:clear-dirty
+   #:component-mounted #:component-unmounted #:component-connected
+   ;; Composition
+   #:component-parent #:component-children #:component-session
+   #:add-child #:remove-child #:component-root #:find-child
    ;; Server
    #:fluxion-app #:make-fluxion-app
    #:register-component #:register-component-factory #:register-action
@@ -270,6 +301,9 @@
    #:push-event #:push-events #:push-component-patch
    #:find-component #:*current-session*
    #:app-handler #:app-sessions #:app-session-lock
+   ;; Middleware
+   #:add-middleware #:remove-middleware #:clear-middleware
+   #:make-request-logger #:make-rate-limiter #:make-cors-middleware
    ;; Events
    #:make-patch-event #:make-remove-event #:make-append-event
    #:make-prepend-event #:make-signal-event #:make-script-event
