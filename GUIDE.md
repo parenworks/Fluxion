@@ -123,6 +123,108 @@ The button is disabled immediately on click, then re-enabled when the server res
 
 ---
 
+## Component Lifecycle
+
+Components can implement lifecycle callbacks to hook into session creation, SSE connection, and session destruction.
+
+### Initialisation on mount
+
+Use `component-mounted` to set initial state based on session context:
+
+```lisp
+(defmethod fluxion.components:component-mounted ((d dashboard) session)
+  (let ((user (fluxion.server:session-user session)))
+    (setf (dashboard-greeting d)
+          (format nil "Welcome back, ~A" user))))
+```
+
+### Resource cleanup on unmount
+
+Use `component-unmounted` to release resources when the session expires:
+
+```lisp
+(defmethod fluxion.components:component-unmounted ((w worker-view) session)
+  (declare (ignore session))
+  (when (worker-poll-thread w)
+    (setf (worker-stop-flag w) t)))
+```
+
+Errors in `component-unmounted` are caught and do not prevent the session from being reaped. This guarantees cleanup of one component never blocks cleanup of others.
+
+### Pushing state on SSE connect
+
+Use `component-connected` to push the current state when the browser establishes the EventSource connection. This fires on initial connection and on every reconnect:
+
+```lisp
+(defmethod fluxion.components:component-connected ((f feed) session)
+  (fluxion.server:push-component-patch session f))
+```
+
+This ensures the client always has current state after a reconnect, even if updates were missed while disconnected.
+
+---
+
+## Component Composition
+
+### Parent-child nesting
+
+Components can form trees. Use `add-child` to establish the relationship:
+
+```lisp
+(defmethod fluxion.components:component-mounted ((shell app-shell) session)
+  (let ((dashboard (fluxion.server:session-component session "dashboard")))
+    (setf (shell-content shell) dashboard)
+    (fluxion.components:add-child shell dashboard)))
+```
+
+The child's `component-parent` and `component-session` are set automatically. If the child was previously parented elsewhere, `add-child` moves it.
+
+### Dynamic page switching
+
+Swap children at runtime in an action handler:
+
+```lisp
+(fluxion.components:defaction app-shell :navigate (c params)
+  (let* ((page-name (cdr (assoc :page params)))
+         (session (fluxion.components:component-session c))
+         (new-page (fluxion.server:session-component session page-name)))
+    (when (shell-content c)
+      (fluxion.components:remove-child c (shell-content c)))
+    (setf (shell-content c) new-page)
+    (fluxion.components:add-child c new-page))
+  nil)
+```
+
+### Session access from any component
+
+Every component has a `component-session` back-pointer, eliminating the need to scan all sessions:
+
+```lisp
+(defun current-user (component)
+  (fluxion.server:session-user
+   (fluxion.components:component-session component)))
+```
+
+### Finding descendants
+
+Search a component tree by ID:
+
+```lisp
+(fluxion.components:find-child shell "settings-panel")
+```
+
+### Child-only patching
+
+When only a child changes, patch it independently without re-rendering the parent:
+
+```lisp
+(fluxion.server:push-component-patch session child-component)
+```
+
+This sends a patch targeting only the child's DOM selector, leaving the rest of the page untouched.
+
+---
+
 ## Server Push Patterns
 
 ### Broadcasting to All Sessions
@@ -497,6 +599,74 @@ curl http://localhost:5000/health
 ```
 
 These can be exposed to Prometheus, Grafana, or any monitoring system by adding a `/metrics` route.
+
+---
+
+## Middleware Patterns
+
+Middleware wraps the Clack handler in an onion-style chain. Each middleware is a function that takes a handler and returns a new handler. Middleware runs in registration order (first = outermost).
+
+### Authentication gate
+
+```lisp
+(defun api-key-middleware (handler)
+  "Block requests without a valid API key header."
+  (lambda (env)
+    (let* ((headers (getf env :headers))
+           (key (and headers (gethash "x-api-key" headers))))
+      (if (valid-api-key-p key)
+          (funcall handler env)
+          (list 401 '(:content-type "text/plain") '("Invalid API key"))))))
+
+(add-middleware app #'api-key-middleware :name :api-key)
+```
+
+### Request timing / metrics
+
+```lisp
+(defun metrics-middleware (handler)
+  "Track request count and timing for monitoring."
+  (let ((counter 0))
+    (lambda (env)
+      (let ((start (get-internal-real-time)))
+        (incf counter)
+        (let ((response (funcall handler env)))
+          (record-metric :request-time
+            (* 1000.0 (/ (- (get-internal-real-time) start)
+                         (float internal-time-units-per-second))))
+          response)))))
+```
+
+### Conditional middleware
+
+Short-circuit selectively. Here only POST routes pass through the rate limiter:
+
+```lisp
+(add-middleware app
+  (lambda (handler)
+    (let ((limited (funcall (make-rate-limiter :requests-per-second 5) handler)))
+      (lambda (env)
+        (if (eq (getf env :request-method) :post)
+            (funcall limited env)
+            (funcall handler env)))))
+  :name :post-limiter)
+```
+
+### Middleware ordering
+
+Middleware applies in registration order. Typical ordering:
+
+1. **CORS** (outermost - adds headers to all responses including errors)
+2. **Request logger** (sees the final status code)
+3. **Rate limiter** (rejects before any work is done)
+4. **Custom auth** (runs after rate limiting passes)
+
+```lisp
+(add-middleware app (make-cors-middleware) :name :cors)
+(add-middleware app (make-request-logger) :name :logger)
+(add-middleware app (make-rate-limiter :requests-per-second 20) :name :limiter)
+(add-middleware app #'my-auth-middleware :name :auth)
+```
 
 ---
 

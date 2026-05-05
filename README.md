@@ -52,6 +52,7 @@ fluxion/
     components.lisp        ; CLOS component model, defaction, defcomponent
     render.lisp            ; Spinneret rendering helpers
     app.lisp               ; fluxion-app class, component/session registration
+    middleware.lisp        ; middleware chain, built-in middleware (logger, rate limiter, CORS)
     session.lisp           ; session management and component lookup
     handler.lisp           ; Clack app builder, SSE streaming, action dispatch
     router.lisp            ; URL router with path parameters and guards
@@ -114,6 +115,60 @@ For full control, define the class and render method yourself:
       (:button :data-on-click "/action/my-widget/update" "Update"))))
 ```
 
+## Component Lifecycle
+
+Components have optional lifecycle callbacks that fire at key points in the session lifecycle:
+
+```lisp
+(defclass my-widget (fluxion.components:component)
+  ((timer :initform nil :accessor widget-timer))
+  (:default-initargs :id "my-widget"))
+
+(defmethod fluxion.components:component-mounted ((w my-widget) session)
+  "Called when the component is created for a new session."
+  (setf (widget-timer w)
+        (start-background-poll w session)))
+
+(defmethod fluxion.components:component-unmounted ((w my-widget) session)
+  "Called when the session is being reaped."
+  (when (widget-timer w)
+    (stop-timer (widget-timer w))))
+
+(defmethod fluxion.components:component-connected ((w my-widget) session)
+  "Called each time the browser opens the SSE connection."
+  (push-initial-state w session))
+```
+
+- **`component-mounted`** - fires once when the factory creates the component for a new session. Use for per-session initialisation.
+- **`component-unmounted`** - fires when the session is reaped. Use for cleanup (cancel timers, close resources). Errors are caught and do not prevent reaping.
+- **`component-connected`** - fires each time the browser opens (or re-opens) the EventSource connection. Use to push initial state or start per-session background work.
+
+All three have no-op default methods on `component`, so you only override what you need.
+
+## Component Composition
+
+Components can be nested into parent-child trees. Every component has a `component-parent`, `component-children`, and `component-session` back-pointer.
+
+```lisp
+;; Build a tree
+(let ((shell (session-component session "app-shell"))
+      (page  (session-component session "dashboard")))
+  (add-child shell page)
+  ;; page now has parent = shell, session = session's session ref
+  (component-parent page)   ; => shell
+  (component-session page)  ; => session (propagated from parent)
+  (component-root page)     ; => shell (walks up to top-level)
+  (find-child shell "dashboard") ; => page (searches descendants))
+```
+
+- **`add-child`** - establishes parent-child link; moves the child if already parented elsewhere. Propagates session reference.
+- **`remove-child`** - breaks the link and clears the child's parent.
+- **`component-root`** - walks up to the top-level ancestor.
+- **`find-child`** - searches descendants by component ID.
+- **`component-session`** - set automatically during factory creation. Propagated to children via `add-child`.
+
+Patching a child independently of its parent works naturally: `(patch-component child)` targets only the child's DOM selector.
+
 ## Actions
 
 The `defaction` macro defines a CLOS method that handles a specific action on a component. The URL pattern is `/action/{component-id}/{action-name}`. Actions automatically mark the component dirty and send a patch after the body runs.
@@ -171,6 +226,56 @@ Options on `make-fluxion-app`:
 Every app exposes `GET /health` automatically (no session required) returning JSON with uptime, session count, SSE connection count, and server backend. See [DEPLOYMENT.md](DEPLOYMENT.md) for production setup.
 
 The reaper runs in a background thread and uses a stop flag for graceful shutdown (no `destroy-thread`). When a session is reaped, its SSE event queue is closed so the streaming thread unblocks and terminates cleanly. The reaper catches and logs errors instead of crashing, so a single corrupt session won't take down the cleanup loop.
+
+## Middleware
+
+Fluxion supports an onion-style middleware chain. Middleware wraps the Clack handler and can intercept, transform, or short-circuit requests. Middleware is applied in registration order (first registered = outermost).
+
+```lisp
+(let ((app (fluxion.server:make-fluxion-app)))
+  ;; Add request logging (skips /health by default)
+  (add-middleware app (make-request-logger :skip-health t) :name :logger)
+
+  ;; Add rate limiting (token bucket)
+  (add-middleware app (make-rate-limiter :requests-per-second 10 :burst 20)
+    :name :limiter)
+
+  ;; Add CORS headers
+  (add-middleware app (make-cors-middleware
+                       :allowed-origins '("https://myapp.example.com"))
+    :name :cors)
+
+  (start app page-handler))
+```
+
+### Writing custom middleware
+
+A middleware is a function that takes a handler and returns a new handler. Both handlers have the Clack signature `(lambda (env) ...)`.
+
+```lisp
+(defun my-auth-middleware (handler)
+  "Reject requests without a valid API key."
+  (lambda (env)
+    (let ((headers (getf env :headers)))
+      (if (and headers (gethash "x-api-key" headers))
+          (funcall handler env)
+          (list 401 '(:content-type "text/plain") '("Unauthorized"))))))
+
+(add-middleware app #'my-auth-middleware :name :api-auth)
+```
+
+### Built-in middleware
+
+- **`make-request-logger`** - logs method, path, status, and elapsed time. Options: `:stream`, `:skip-health`.
+- **`make-rate-limiter`** - token bucket rate limiter. Options: `:requests-per-second`, `:burst`, `:key-fn` (for per-client limiting). Returns 429 when over limit.
+- **`make-cors-middleware`** - adds CORS headers and handles OPTIONS preflight. Options: `:allowed-origins`, `:allowed-methods`, `:allowed-headers`, `:max-age`.
+
+### Managing middleware
+
+```lisp
+(remove-middleware app :limiter)  ; remove by name
+(clear-middleware app)            ; remove all
+```
 
 ## CSRF Protection
 
@@ -573,6 +678,42 @@ See [API.md](API.md) for the complete API reference covering all exported symbol
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment with Caddy, nginx, systemd, and SSE configuration.
 
+## Implementation Compatibility
+
+| Implementation | Status | Notes |
+| --- | --- | --- |
+| **SBCL** | Full support (primary) | Woo and Hunchentoot backends both work. Used for development and production. |
+| **CCL** (Clozure CL) | Supported | All unit tests pass (365 checks). See CCL limitations below. |
+| **ECL** | Not supported | Serapeum (transitive dependency) fails to compile on ECL due to type system incompatibility. |
+
+### CCL limitations
+
+**Woo backend**: Works correctly for normal production use (single long-lived server). However, starting and stopping multiple Woo servers within the same process (e.g. in test harnesses) triggers a libev assertion failure:
+
+```text
+ev_signal_start: "a signal must not be attached to two different loops"
+```
+
+This occurs because libev's signal watchers are process-global. When Woo stops one event loop and starts another, the signal registration from the previous loop conflicts with the new one. Woo does not fully clean up its libev signal state on shutdown.
+
+**Workaround**: Use `:hunchentoot` backend on CCL if you need to start/stop servers repeatedly (e.g. integration tests, hot reload). For production deployment with a single server instance, Woo on CCL works fine.
+
+**Hunchentoot backend**: Works perfectly on CCL with no known issues.
+
+**Binary images**: Use `ccl:save-application` instead of `sb-ext:save-lisp-and-die`:
+
+```lisp
+(ccl:save-application "my-app"
+  :toplevel-function (lambda ()
+                       (my-app:start :port 5000)
+                       (loop (sleep 3600)))
+  :prepend-kernel t)
+```
+
+### ECL status
+
+ECL 26.3.27 cannot compile serapeum (a transitive dependency via hunchentoot and clack). The failure is in serapeum's `hash-tables.lisp` where the `ASSURE` type-checking macro calls `SI::EXPAND-DEFTYPE` with the wrong number of arguments. This is an ECL/serapeum incompatibility that would need to be resolved upstream. Since all web server backends depend on serapeum transitively, Fluxion cannot currently run on ECL.
+
 ## Dependencies
 
 - [Spinneret](https://github.com/ruricolist/spinneret) - HTML generation
@@ -596,7 +737,8 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment with Caddy, nginx, 
 - **v0.8** - glitch-free transactions, height-based topological scheduling
 - **v0.9** - thread-safe cell graph, concurrent writer support
 - **v1.0** - Woo backend, health endpoint, request logging, SSE stress testing, GUIDE.md
-- **v1.1** - Non-blocking SSE (threaded writer), DOM morph fixes (clone-node, value property sync), umbrella package (current)
+- **v1.1** - Non-blocking SSE (threaded writer), DOM morph fixes (clone-node, value property sync), umbrella package
+- **v1.2** - Middleware system, convergence safety (iteration cap, rational guard), CCL support (current)
 
 ## Licence
 

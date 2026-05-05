@@ -63,6 +63,14 @@
   :description "Request logging, health endpoint, SSE stress."
   :in fluxion-suite)
 
+(def-suite middleware-suite
+  :description "Middleware chain, built-in middleware."
+  :in fluxion-suite)
+
+(def-suite lifecycle-suite
+  :description "Component lifecycle callbacks: mounted, unmounted, connected."
+  :in fluxion-suite)
+
 (def-suite convergence-suite
   :description "Convergence safety: iteration cap, rational guard, tolerance."
   :in fluxion-suite)

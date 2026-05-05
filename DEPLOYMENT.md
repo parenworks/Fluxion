@@ -28,7 +28,9 @@ Fluxion spawns a dedicated thread per SSE connection so Woo's event loop stays f
 (my-app:start :port 5000 :server :hunchentoot) ; debugging
 ```
 
-For a standalone binary, use SBCL's `save-lisp-and-die`:
+For a standalone binary:
+
+### SBCL
 
 ```lisp
 (sb-ext:save-lisp-and-die "my-app"
@@ -38,6 +40,18 @@ For a standalone binary, use SBCL's `save-lisp-and-die`:
   :executable t
   :compression t)
 ```
+
+### CCL
+
+```lisp
+(ccl:save-application "my-app"
+  :toplevel-function (lambda ()
+                       (my-app:start :port 5000)
+                       (loop (sleep 3600)))
+  :prepend-kernel t)
+```
+
+Note: On CCL with the Woo backend, avoid starting and stopping multiple servers in the same process (see README for details). For production deployment with a single server instance, Woo on CCL works fine. Alternatively, use `:server :hunchentoot`.
 
 Woo requires `libev-dev` at runtime. Install it before deploying:
 

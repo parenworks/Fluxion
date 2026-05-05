@@ -18,8 +18,23 @@ Slots:
 - **`signals`** - Optional signal-store for this component's reactive state.
 - **`dirty-p`** - Whether this component needs re-rendering.
 - **`last-html`** - Cached HTML from the last render, used for dirty comparison.
+- **`parent`** - Parent component, or NIL for top-level components.
+- **`children`** - List of child components nested inside this component.
+- **`session-ref`** - Back-pointer to the owning session. Set during session creation.
 
 ### Generic Functions
+
+**`add-child (parent child)`** - Add CHILD as a nested child of PARENT.
+Sets the child's parent back-pointer and propagates the session reference.
+If CHILD was previously parented elsewhere, it is removed from the old parent first.
+
+**`component-children (component)`** - List of child components nested inside this component.
+
+**`component-connected (component session)`** - Called when the SSE stream is established for SESSION.
+This fires each time the browser opens (or re-opens) the EventSource
+connection. Override to push initial state or start session-specific
+background work.
+Default method does nothing.
 
 **`component-dirty-p (component)`** - Whether this component needs re-rendering. Set by mark-dirty, cleared by patch-component.
 
@@ -27,7 +42,26 @@ Slots:
 
 **`component-last-html (component)`** - Cached HTML from the last render. Used for dirty comparison to avoid sending no-op patches.
 
+**`component-mounted (component session)`** - Called when COMPONENT is first created for a SESSION.
+This happens during session creation when component factories run.
+Override to perform per-session initialisation (start timers, open
+resources, set initial state based on session context).
+Default method does nothing.
+
+**`component-parent (component)`** - The parent component, or NIL if this is a top-level component.
+
+**`component-root (component)`** - Walk up the parent chain to find the root (top-level) component.
+
+**`component-session (component)`** - Back-pointer to the session that owns this component. Set automatically during session creation.
+
 **`component-signals (component)`** - Optional signal-store for this component's client-side reactive state.
+
+**`component-unmounted (component session)`** - Called when SESSION is being reaped and COMPONENT will be discarded.
+Override to perform cleanup (cancel timers, close connections, release
+resources). Called inside the session lock during reaping.
+Default method does nothing.
+
+**`find-child (component id)`** - Find a descendant component by ID. Searches breadth-first.
 
 **`handle-action (component action params)`** - Handle an incoming ACTION for COMPONENT.
 ACTION is a keyword symbol identifying the action.
@@ -40,6 +74,9 @@ convenience.
 Re-renders the component and targets its DOM selector.
 If the rendered HTML is identical to the cached version and FORCE
 is NIL, returns an empty list (no patch sent).
+
+**`remove-child (parent child)`** - Remove CHILD from PARENT's children list.
+Clears the child's parent back-pointer.
 
 **`render (component)`** - Render COMPONENT to an HTML string.  This is the primary method
 application code must specialise.  Should return a string of HTML
@@ -81,6 +118,8 @@ Example:
 
 **`mark-dirty (component)`** - Mark COMPONENT as needing re-rendering.
 
+**`propagate-session (component session)`** - Set the session reference on COMPONENT and all its descendants.
+
 ---
 
 ## Cells / Lattice - reactive cells, computed cells, propagators, transactions
@@ -120,6 +159,13 @@ Slots:
 - **`dependencies`** - List of cells this computed depends on.
 - **`update-fn`** - The watcher function installed on dependencies.
 
+### Class: `propagation-limit-exceeded`
+
+Slots:
+
+- **`rounds`**
+- **`remaining`**
+
 ### Class: `propagator`
 
 A propagator connects input cells to output cells.
@@ -146,6 +192,10 @@ Slots:
 **`cell-watchers (cell)`** - List of watcher entries called with (new-value old-value) on change.
 
 **`computed-dependencies (computed-cell)`** - List of cells this computed cell depends on. Automatically tracked and updated on each recomputation.
+
+**`propagation-limit-remaining (condition)`**
+
+**`propagation-limit-rounds (condition)`**
 
 **`propagator-inputs (propagator)`** - List of input cells that trigger this propagator when changed.
 
@@ -198,6 +248,10 @@ FN receives the current values of INPUTS as arguments.
 For a single output, FN returns one value.
 For multiple outputs, FN returns a list of values.
 
+**`rational-too-large-p (value &optional (limit (expt 2 128)))`** - Return T if VALUE is a rational whose numerator or denominator
+exceeds LIMIT (default 2^128).  Useful for detecting runaway growth
+in propagator cycles that converge to irrational fixed points.
+
 **`recompute (computed)`** - Recalculate COMPUTED's value by running its thunk.
 Discovers dependencies via *tracking-reads* and rewires watchers.
 Updates height to max(dep heights) + 1 for topological ordering.
@@ -217,6 +271,9 @@ Returns the watcher entry.
 ### Variables
 
 **`*cell-lock*`** *(variable)* - Global recursive lock protecting the cell graph.
+
+**`*max-propagation-rounds*`** *(variable)* - Maximum number of flush iterations per transaction before signalling
+PROPAGATION-LIMIT-EXCEEDED.  Set to NIL to disable the cap (not recommended).
 
 **`*pending-events*`** *(variable)* - When bound to a list, cell-triggered watchers append SSE events here.
 Bound by the action dispatch machinery so that cell changes during an
@@ -270,6 +327,7 @@ Slots:
 - **`server`** - Clack server backend. :woo (default) or :hunchentoot.
 - **`started-at`** - Universal time when the server was started.
 - **`request-log`** - When non-nil, log every request to *standard-output*.
+- **`middleware`** - List of middleware-entry structs applied at start time.
 
 ### Class: `fluxion-error`
 
@@ -325,7 +383,14 @@ Slots:
 
 **`action-dispatch-error-path (condition)`** - The URL path of the action that failed.
 
+**`add-middleware (app middleware &key name)`** - Add MIDDLEWARE to APP's middleware chain.
+MIDDLEWARE is a function of (handler) that returns a new handler.
+NAME is an optional keyword for identification and removal.
+Middleware is applied in registration order (first = outermost).
+
 **`app-handler (app)`** - The running Clack handler reference (used for stopping the server).
+
+**`app-middleware (object)`**
 
 **`app-reaper-interval (app)`** - Seconds between session reaper runs.
 
@@ -340,6 +405,8 @@ Slots:
 **`app-sessions (app)`** - Hash table of active sessions keyed by session-id string.
 
 **`app-started-at (app)`** - Universal time when the server was started.
+
+**`clear-middleware (app)`** - Remove all middleware from APP.
 
 **`component-not-found-id (condition)`** - The component-id string that could not be resolved.
 
@@ -364,6 +431,8 @@ of SSE events to send, or write directly to an event stream.
 **`register-component-factory (app id factory-fn)`** - Register a factory function for per-session component creation.
 ID is the component-id string. FACTORY-FN is a function of zero arguments
 that returns a fresh component instance.
+
+**`remove-middleware (app name)`** - Remove middleware identified by NAME from APP.
 
 **`session-component (session id)`** - Find a component by ID within a SESSION.
 
@@ -440,11 +509,31 @@ terminates cleanly and does not steal events from the new connection.
 **`logout (session)`** - Clear the authenticated user from SESSION.
 Regenerates the CSRF token.
 
+**`make-cors-middleware (&key (allowed-origins '(*)) (allowed-methods '(get post options)) (allowed-headers
+                                                                   '(content-type
+                                                                     x-csrf-token)) (max-age
+                                                                                     86400))`** - Return a middleware that adds CORS headers to responses.
+ALLOWED-ORIGINS: list of origin strings, or '("*") for any origin.
+ALLOWED-METHODS: list of HTTP method strings.
+ALLOWED-HEADERS: list of header name strings.
+MAX-AGE: preflight cache duration in seconds (default 86400).
+
 **`make-fluxion-app (&key (port 5000) static-dir (session-ttl 3600) (reaper-interval 60) (server woo) (request-log
                                                                                   t))`** - Create a new Fluxion application instance.
 SERVER is the Clack backend: :woo (default) or :hunchentoot.
 Woo uses libev for async I/O. Install libev-dev to use it.
 REQUEST-LOG: when non-nil (default T), logs every request.
+Middleware is added after creation via ADD-MIDDLEWARE.
+
+**`make-rate-limiter (&key (requests-per-second 10) (burst 20) (key-fn nil))`** - Return a middleware that rate-limits requests using a token bucket.
+REQUESTS-PER-SECOND: refill rate.
+BURST: maximum tokens (allows short bursts above the steady rate).
+KEY-FN: function of (env) returning a string key for per-client limiting.
+         Default NIL means global (all clients share one bucket).
+
+**`make-request-logger (&key (stream *standard-output*) (skip-health nil))`** - Return a middleware that logs each request.
+STREAM: output stream (default *standard-output*).
+SKIP-HEALTH: when T, omit GET /health from the log.
 
 **`make-router (&key not-found-handler)`** - Create a new router instance.
 
@@ -481,6 +570,9 @@ This bridges the router into the existing Fluxion server.
 Sets the stop flag, interrupts the sleeping thread, and waits briefly.
 
 **`touch-session (session)`** - Update the last-accessed-at timestamp on SESSION.
+
+**`wrap-handler (handler app)`** - Compose all registered middleware around HANDLER.
+Middleware is applied in registration order: first registered = outermost.
 
 ### Variables
 

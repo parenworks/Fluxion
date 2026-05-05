@@ -189,6 +189,11 @@ HTML page response."
                        ((and (eq method :get)
                              (string= path "/sse"))
                         (let ((queue (ensure-event-queue session)))
+                          ;; Fire lifecycle callback on all session components
+                          (maphash (lambda (id c)
+                                     (declare (ignore id))
+                                     (ignore-errors (component-connected c session)))
+                                   (session-components session))
                           ;; Return a streaming callback for Clack.
                           ;; On Woo (async), we spawn a dedicated thread so
                           ;; the event loop stays free for other requests.
@@ -283,7 +288,7 @@ HTML page response."
   (when server-supplied-p
     (setf (app-server app) server))
   (setf (app-started-at app) (get-universal-time))
-  (let ((clack-app (make-clack-app app page-handler)))
+  (let ((clack-app (wrap-handler (make-clack-app app page-handler) app)))
     (setf (app-handler app)
           (clack:clackup clack-app
                          :port (app-port app)

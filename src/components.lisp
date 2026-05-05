@@ -22,6 +22,15 @@
 (defgeneric component-last-html (component)
   (:documentation "Cached HTML from the last render. Used for dirty comparison to avoid sending no-op patches."))
 
+(defgeneric component-parent (component)
+  (:documentation "The parent component, or NIL if this is a top-level component."))
+
+(defgeneric component-children (component)
+  (:documentation "List of child components nested inside this component."))
+
+(defgeneric component-session (component)
+  (:documentation "Back-pointer to the session that owns this component. Set automatically during session creation."))
+
 (defclass component ()
   ((id      :initarg :id
             :accessor component-id
@@ -37,7 +46,16 @@
             :documentation "Whether this component needs re-rendering.")
    (last-html :initform nil
               :accessor component-last-html
-              :documentation "Cached HTML from the last render, used for dirty comparison."))
+              :documentation "Cached HTML from the last render, used for dirty comparison.")
+   (parent  :initform nil
+            :accessor component-parent
+            :documentation "Parent component, or NIL for top-level components.")
+   (children :initform nil
+             :accessor component-children
+             :documentation "List of child components nested inside this component.")
+   (session-ref :initform nil
+                :accessor component-session
+                :documentation "Back-pointer to the owning session. Set during session creation."))
   (:documentation "Base class for all Fluxion components."))
 
 (defmethod initialize-instance :after ((c component) &key)
@@ -65,6 +83,42 @@ events to send to the client, or use (patch component) as a
 convenience."))
 
 ;;; -------------------------------------------------------
+;;; Lifecycle callbacks
+;;; -------------------------------------------------------
+
+(defgeneric component-mounted (component session)
+  (:documentation "Called when COMPONENT is first created for a SESSION.
+This happens during session creation when component factories run.
+Override to perform per-session initialisation (start timers, open
+resources, set initial state based on session context).
+Default method does nothing."))
+
+(defmethod component-mounted ((c component) session)
+  (declare (ignore c session))
+  nil)
+
+(defgeneric component-unmounted (component session)
+  (:documentation "Called when SESSION is being reaped and COMPONENT will be discarded.
+Override to perform cleanup (cancel timers, close connections, release
+resources). Called inside the session lock during reaping.
+Default method does nothing."))
+
+(defmethod component-unmounted ((c component) session)
+  (declare (ignore c session))
+  nil)
+
+(defgeneric component-connected (component session)
+  (:documentation "Called when the SSE stream is established for SESSION.
+This fires each time the browser opens (or re-opens) the EventSource
+connection. Override to push initial state or start session-specific
+background work.
+Default method does nothing."))
+
+(defmethod component-connected ((c component) session)
+  (declare (ignore c session))
+  nil)
+
+;;; -------------------------------------------------------
 ;;; Helpers
 ;;; -------------------------------------------------------
 
@@ -81,6 +135,60 @@ convenience."))
   "Clear the dirty flag on COMPONENT."
   (setf (component-dirty-p component) nil)
   component)
+
+;;; -------------------------------------------------------
+;;; Composition helpers
+;;; -------------------------------------------------------
+
+(defgeneric add-child (parent child)
+  (:documentation "Add CHILD as a nested child of PARENT.
+Sets the child's parent back-pointer and propagates the session reference.
+If CHILD was previously parented elsewhere, it is removed from the old parent first."))
+
+(defmethod add-child ((parent component) (child component))
+  (when (component-parent child)
+    (remove-child (component-parent child) child))
+  (setf (component-parent child) parent)
+  (pushnew child (component-children parent) :test #'eq)
+  ;; Propagate session reference
+  (when (component-session parent)
+    (propagate-session child (component-session parent)))
+  child)
+
+(defgeneric remove-child (parent child)
+  (:documentation "Remove CHILD from PARENT's children list.
+Clears the child's parent back-pointer."))
+
+(defmethod remove-child ((parent component) (child component))
+  (setf (component-children parent)
+        (remove child (component-children parent) :test #'eq))
+  (setf (component-parent child) nil)
+  child)
+
+(defun propagate-session (component session)
+  "Set the session reference on COMPONENT and all its descendants."
+  (setf (component-session component) session)
+  (dolist (child (component-children component))
+    (propagate-session child session)))
+
+(defgeneric component-root (component)
+  (:documentation "Walk up the parent chain to find the root (top-level) component."))
+
+(defmethod component-root ((c component))
+  (if (component-parent c)
+      (component-root (component-parent c))
+      c))
+
+(defgeneric find-child (component id)
+  (:documentation "Find a descendant component by ID. Searches breadth-first."))
+
+(defmethod find-child ((c component) (id string))
+  (labels ((search-children (comp)
+             (dolist (child (component-children comp))
+               (when (string= (component-id child) id)
+                 (return-from find-child child))
+               (search-children child))))
+    (search-children c)))
 
 ;;; -------------------------------------------------------
 ;;; defaction macro

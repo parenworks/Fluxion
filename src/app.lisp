@@ -80,7 +80,10 @@
    (request-log :initarg :request-log
                 :accessor app-request-log
                 :initform t
-                :documentation "When non-nil, log every request to *standard-output*."))
+                :documentation "When non-nil, log every request to *standard-output*.")
+   (middleware  :initform nil
+               :accessor app-middleware
+               :documentation "List of middleware-entry structs applied at start time."))
   (:documentation "Top-level Fluxion application."))
 
 (defmethod print-object ((app fluxion-app) stream)
@@ -95,7 +98,8 @@
   "Create a new Fluxion application instance.
 SERVER is the Clack backend: :woo (default) or :hunchentoot.
 Woo uses libev for async I/O. Install libev-dev to use it.
-REQUEST-LOG: when non-nil (default T), logs every request."
+REQUEST-LOG: when non-nil (default T), logs every request.
+Middleware is added after creation via ADD-MIDDLEWARE."
   (make-instance 'fluxion-app :port port :static-dir static-dir
                               :session-ttl session-ttl
                               :reaper-interval reaper-interval
@@ -212,7 +216,9 @@ Ensures per-session component instances are created from factories."
               ;; Create per-session component instances from factories
               (maphash (lambda (id factory-fn)
                          (let ((c (funcall factory-fn)))
-                           (setf (gethash id (session-components session)) c)))
+                           (setf (gethash id (session-components session)) c)
+                           (setf (component-session c) session)
+                           (component-mounted c session)))
                        (app-component-factories app))
               (setf (gethash new-sid (app-sessions app)) session)
               (values session t)))))))
