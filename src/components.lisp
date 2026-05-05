@@ -242,11 +242,13 @@ Example:
            (append
             ;; Plain slots -> normal CLOS slots
             (mapcar (lambda (s)
-                      (let ((sname (car s))
-                            (initform (getf (cdr s) :initform))
-                            (accessor (getf (cdr s) :accessor)))
+                      (let* ((sname (car s))
+                             (props (cdr s))
+                             (has-initform (not (eq (getf props :initform :no-initform) :no-initform)))
+                             (initform (getf props :initform))
+                             (accessor (getf props :accessor)))
                         `(,sname
-                          ,@(when initform `(:initform ,initform))
+                          ,@(when has-initform `(:initform ,initform))
                           ,@(when accessor `(:accessor ,accessor)))))
                     plain-slots)
             ;; Cell slots -> internal cell-holder slot
