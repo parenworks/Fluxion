@@ -158,3 +158,15 @@
      (:file "test-db-query")
      (:file "test-db-contract")
      (:file "test-db-model")))))
+
+(defsystem "fluxion/db-pg-tests"
+  :name "fluxion-db-pg-tests"
+  :version "0.1.0"
+  :description "PostgreSQL contract tests for the Fluxion database layer."
+  :depends-on ("fluxion/db-tests" "fluxion/db-pg" "fluxion/db-sqlite")
+  :serial t
+  :components
+  ((:module "tests"
+    :serial t
+    :components
+    ((:file "test-db-postgresql")))))
