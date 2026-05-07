@@ -372,3 +372,21 @@ Uses SERIAL for auto-incrementing primary key."
   (with-pg-conn backend
     (pomo:with-transaction ()
       (funcall thunk))))
+
+;;; -------------------------------------------------------
+;;; Relational extension (fluxion.rdb) support
+;;; -------------------------------------------------------
+
+(defmethod fluxion.rdb:%join ((backend postgresql-backend) type left right
+                              &key on query fields sort skip amount)
+  (let ((compiled (fluxion.rdb::compile-join-sql
+                   type left right
+                   :on on :query query :fields fields
+                   :sort sort :skip skip :amount amount)))
+    (%query-rows backend (car compiled) (cdr compiled))))
+
+(defmethod fluxion.rdb:%sql-query ((backend postgresql-backend) sql params)
+  (%query-rows backend sql params))
+
+(defmethod fluxion.rdb:%sql-execute ((backend postgresql-backend) sql params)
+  (%execute backend sql params))

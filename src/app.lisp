@@ -83,7 +83,11 @@
                 :documentation "When non-nil, log every request to *standard-output*.")
    (middleware  :initform nil
                :accessor app-middleware
-               :documentation "List of middleware-entry structs applied at start time."))
+               :documentation "List of middleware-entry structs applied at start time.")
+   (session-store :initarg :session-store
+                  :accessor app-session-store
+                  :initform (make-instance 'memory-session-store)
+                  :documentation "Pluggable session store for persistence. Default is in-memory only."))
   (:documentation "Top-level Fluxion application."))
 
 (defmethod print-object ((app fluxion-app) stream)

@@ -208,6 +208,18 @@
    #:start-session-reaper
    #:stop-session-reaper
    #:app-request-log
+   #:app-session-store
+   #:app-component-factories
+   ;; Session store protocol
+   #:store-session
+   #:load-session
+   #:delete-session
+   #:load-all-sessions
+   #:gc-sessions
+   #:store-setup
+   #:memory-session-store
+   #:session-created-at
+   #:session-last-accessed-at
    #:app-started-at
    #:app-uptime-seconds
    #:app-session-count

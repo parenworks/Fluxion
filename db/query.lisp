@@ -35,8 +35,13 @@ Symbols are lowercased and hyphens become underscores."
     (substitute #\_ #\- name)))
 
 (defun quote-identifier (name)
-  "Quote a SQL identifier (table or column name) with double quotes."
-  (format nil "\"~A\"" (field-name-sql name)))
+  "Quote a SQL identifier (table or column name) with double quotes.
+Handles qualified names like users._id by quoting each part separately."
+  (let ((raw (field-name-sql name)))
+    (let ((dot (position #\. raw)))
+      (if dot
+          (format nil "\"~A\".\"~A\"" (subseq raw 0 dot) (subseq raw (1+ dot)))
+          (format nil "\"~A\"" raw)))))
 
 ;;; -------------------------------------------------------
 ;;; Query compilation

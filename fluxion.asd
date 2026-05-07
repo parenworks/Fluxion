@@ -35,6 +35,7 @@
      (:file "csrf")
      (:file "event-queue")
      (:file "session")
+     (:file "session-store")
      (:file "auth")
      (:file "app")
      (:file "middleware")
@@ -118,13 +119,26 @@
      (:file "backend")
      (:file "model")))))
 
+(defsystem "fluxion/rdb"
+  :name "fluxion-rdb"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Relational database extension for Fluxion. Joins and raw SQL."
+  :depends-on ("fluxion/db")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "rdb")))))
+
 (defsystem "fluxion/db-sqlite"
   :name "fluxion-db-sqlite"
   :version "0.1.0"
   :author "Glenn Thompson"
   :licence "MIT"
   :description "SQLite backend for the Fluxion database layer."
-  :depends-on ("fluxion/db" "sqlite")
+  :depends-on ("fluxion/db" "fluxion/rdb" "sqlite")
   :serial t
   :components
   ((:module "db"
@@ -137,18 +151,32 @@
   :author "Glenn Thompson"
   :licence "MIT"
   :description "PostgreSQL backend for the Fluxion database layer."
-  :depends-on ("fluxion/db" "postmodern")
+  :depends-on ("fluxion/db" "fluxion/rdb" "postmodern")
   :serial t
   :components
   ((:module "db"
     :components
     ((:file "postgresql")))))
 
+(defsystem "fluxion/session-db"
+  :name "fluxion-session-db"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Database-backed session persistence for Fluxion."
+  :depends-on ("fluxion" "fluxion/db")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "session-store")))))
+
 (defsystem "fluxion/db-tests"
   :name "fluxion-db-tests"
   :version "0.1.0"
   :description "Test suite for the Fluxion database layer."
-  :depends-on ("fluxion/db" "fluxion/db-sqlite" "fiveam")
+  :depends-on ("fluxion/db" "fluxion/rdb" "fluxion/db-sqlite"
+               "fluxion/session-db" "fiveam")
   :serial t
   :components
   ((:module "tests"
@@ -157,7 +185,9 @@
     ((:file "test-db-package")
      (:file "test-db-query")
      (:file "test-db-contract")
-     (:file "test-db-model")))))
+     (:file "test-db-model")
+     (:file "test-rdb")
+     (:file "test-session-store")))))
 
 (defsystem "fluxion/db-pg-tests"
   :name "fluxion-db-pg-tests"

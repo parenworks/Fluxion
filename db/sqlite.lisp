@@ -249,3 +249,21 @@ Booleans become 0/1. NIL becomes :null."
       (error (e)
         (sqlite:execute-non-query handle "ROLLBACK")
         (error e)))))
+
+;;; -------------------------------------------------------
+;;; Relational extension (fluxion.rdb) support
+;;; -------------------------------------------------------
+
+(defmethod fluxion.rdb:%join ((backend sqlite-backend) type left right
+                              &key on query fields sort skip amount)
+  (let ((compiled (fluxion.rdb::compile-join-sql
+                   type left right
+                   :on on :query query :fields fields
+                   :sort sort :skip skip :amount amount)))
+    (%query-rows backend (car compiled) (cdr compiled))))
+
+(defmethod fluxion.rdb:%sql-query ((backend sqlite-backend) sql params)
+  (%query-rows backend sql params))
+
+(defmethod fluxion.rdb:%sql-execute ((backend sqlite-backend) sql params)
+  (%execute backend sql params))
