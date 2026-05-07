@@ -158,6 +158,32 @@
     :components
     ((:file "postgresql")))))
 
+(defsystem "fluxion/user"
+  :name "fluxion-user"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "User/account system for Fluxion with extensible fields and hierarchical permissions."
+  :depends-on ("fluxion/db" "ironclad")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "user")))))
+
+(defsystem "fluxion/auth"
+  :name "fluxion-auth"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Authentication interface for Fluxion. Login/logout and session binding."
+  :depends-on ("fluxion" "fluxion/user" "ironclad")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "auth")))))
+
 (defsystem "fluxion/session-db"
   :name "fluxion-session-db"
   :version "0.1.0"
@@ -176,7 +202,7 @@
   :version "0.1.0"
   :description "Test suite for the Fluxion database layer."
   :depends-on ("fluxion/db" "fluxion/rdb" "fluxion/db-sqlite"
-               "fluxion/session-db" "fiveam")
+               "fluxion/session-db" "fluxion/user" "fluxion/auth" "fiveam")
   :serial t
   :components
   ((:module "tests"
@@ -187,7 +213,9 @@
      (:file "test-db-contract")
      (:file "test-db-model")
      (:file "test-rdb")
-     (:file "test-session-store")))))
+     (:file "test-session-store")
+     (:file "test-user")
+     (:file "test-auth")))))
 
 (defsystem "fluxion/db-pg-tests"
   :name "fluxion-db-pg-tests"
