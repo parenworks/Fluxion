@@ -32,7 +32,7 @@ the required generic functions."))
 
 (deftype field-type ()
   "Portable field types supported by all backends."
-  '(member :text :integer :float :boolean :timestamp))
+  '(member :text :integer :bigint :float :boolean :timestamp))
 
 (deftype id ()
   "Type for record identifiers. Always a positive integer."

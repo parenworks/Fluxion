@@ -219,6 +219,7 @@ Returns the SQL string (no parameters needed)."
   (ecase type
     (:text "TEXT")
     (:integer "INTEGER")
+    (:bigint "INTEGER")
     (:float "REAL")
     (:boolean "INTEGER")
     (:timestamp "TEXT")))

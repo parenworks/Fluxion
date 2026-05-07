@@ -197,6 +197,7 @@ Uses Postmodern's sql-escape for strings."
   (ecase type
     (:text "TEXT")
     (:integer "INTEGER")
+    (:bigint "BIGINT")
     (:float "DOUBLE PRECISION")
     (:boolean "BOOLEAN")
     (:timestamp "TIMESTAMP")))
@@ -206,6 +207,7 @@ Uses Postmodern's sql-escape for strings."
   (let ((up (string-upcase pg-type)))
     (cond
       ((string= up "TEXT") :text)
+      ((string= up "BIGINT") :bigint)
       ((or (string= up "INTEGER") (search "INT" up)) :integer)
       ((or (string= up "DOUBLE PRECISION") (search "FLOAT" up)
            (string= up "REAL") (search "NUMERIC" up)) :float)

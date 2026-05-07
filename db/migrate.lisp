@@ -98,7 +98,7 @@ DOWN is an optional function to reverse it."
              '((module :text)
                (version :integer)
                (description :text)
-               (applied_at :integer))
+               (applied_at :bigint))
              :if-exists :ignore))
 
 (defun applied-versions (module)
