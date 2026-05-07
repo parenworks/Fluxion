@@ -230,6 +230,31 @@ Commits on normal return, rolls back on error."
   `(%execute-transaction (%ensure-connected) (lambda () ,@body)))
 
 ;;; -------------------------------------------------------
+;;; Convenience functions
+;;; -------------------------------------------------------
+
+(defun find-by-id (collection id &key fields)
+  "Find a single record by primary key (_id).
+Returns an alist or NIL if not found.
+Example: (db:find-by-id \"users\" 42)"
+  (select-one collection
+              (fluxion.db.query:compile-query (list := '_id (ensure-id id)))
+              :fields fields))
+
+(defun delete-by-id (collection id)
+  "Delete a single record by primary key (_id).
+Example: (db:delete-by-id \"tracks\" 7)"
+  (remove collection
+         (fluxion.db.query:compile-query (list := '_id (ensure-id id)))
+         :amount 1))
+
+(defun exists-p (collection query)
+  "Return T if at least one record in COLLECTION matches QUERY.
+Example: (db:exists-p \"users\" (db:query (:= email \"a@b.com\")))"
+  (plusp (count collection query)))
+
+
+;;; -------------------------------------------------------
 ;;; Query DSL wrappers
 ;;; -------------------------------------------------------
 

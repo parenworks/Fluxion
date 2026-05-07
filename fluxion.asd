@@ -44,8 +44,6 @@
      (:file "handler")))))
 
 (defsystem "fluxion/tests"
-  :name "fluxion-tests"
-  :version "0.1.0"
   :description "Test suite for Fluxion."
   :depends-on ("fluxion" "fluxion/client" "fiveam" "dexador" "usocket")
   :serial t
@@ -74,8 +72,6 @@
      (:file "test-integration")))))
 
 (defsystem "fluxion/client"
-  :name "fluxion-client"
-  :version "0.1.0"
   :description "Parenscript browser runtime for Fluxion."
   :depends-on ("parenscript" "fluxion")
   :serial t
@@ -87,8 +83,6 @@
      (:file "runtime")))))
 
 (defsystem "fluxion/examples"
-  :name "fluxion-examples"
-  :version "0.1.0"
   :description "Example applications for Fluxion."
   :depends-on ("fluxion" "fluxion/client")
   :serial t
@@ -102,11 +96,7 @@
      (:file "colour-picker")))))
 
 (defsystem "fluxion/db"
-  :name "fluxion-db"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
-  :description "Database abstraction layer for Fluxion. Query DSL, data model, and backend protocol."
+  :description "Database abstraction layer with query DSL, data model, and backend protocol."
   :depends-on ("alexandria")
   :serial t
   :components
@@ -120,11 +110,7 @@
      (:file "model")))))
 
 (defsystem "fluxion/rdb"
-  :name "fluxion-rdb"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
-  :description "Relational database extension for Fluxion. Joins and raw SQL."
+  :description "Relational database extension with joins and raw SQL."
   :depends-on ("fluxion/db")
   :serial t
   :components
@@ -133,10 +119,6 @@
     ((:file "rdb")))))
 
 (defsystem "fluxion/db-sqlite"
-  :name "fluxion-db-sqlite"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
   :description "SQLite backend for the Fluxion database layer."
   :depends-on ("fluxion/db" "fluxion/rdb" "sqlite")
   :serial t
@@ -146,10 +128,6 @@
     ((:file "sqlite")))))
 
 (defsystem "fluxion/db-pg"
-  :name "fluxion-db-postgresql"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
   :description "PostgreSQL backend for the Fluxion database layer."
   :depends-on ("fluxion/db" "fluxion/rdb" "postmodern")
   :serial t
@@ -159,11 +137,7 @@
     ((:file "postgresql")))))
 
 (defsystem "fluxion/user"
-  :name "fluxion-user"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
-  :description "User/account system for Fluxion with extensible fields and hierarchical permissions."
+  :description "User/account system with extensible fields and hierarchical permissions."
   :depends-on ("fluxion/db" "ironclad")
   :serial t
   :components
@@ -172,11 +146,7 @@
     ((:file "user")))))
 
 (defsystem "fluxion/auth"
-  :name "fluxion-auth"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
-  :description "Authentication interface for Fluxion. Login/logout and session binding."
+  :description "Authentication interface with login/logout and session binding."
   :depends-on ("fluxion" "fluxion/user" "ironclad")
   :serial t
   :components
@@ -185,11 +155,7 @@
     ((:file "auth")))))
 
 (defsystem "fluxion/ban"
-  :name "fluxion-ban"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
-  :description "IP-based ban system for Fluxion with database persistence."
+  :description "IP-based ban system with database persistence."
   :depends-on ("fluxion/db")
   :serial t
   :components
@@ -198,11 +164,7 @@
     ((:file "ban")))))
 
 (defsystem "fluxion/rate"
-  :name "fluxion-rate"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
-  :description "Granular per-resource rate limiting for Fluxion."
+  :description "Granular per-resource rate limiting."
   :depends-on ("bordeaux-threads")
   :serial t
   :components
@@ -211,10 +173,6 @@
     ((:file "rate")))))
 
 (defsystem "fluxion/cache"
-  :name "fluxion-cache"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
   :description "Named caching interface with TTL and multiple backends."
   :depends-on ("fluxion/db" "bordeaux-threads" "babel" "ironclad")
   :serial t
@@ -224,11 +182,7 @@
     ((:file "cache")))))
 
 (defsystem "fluxion/profile"
-  :name "fluxion-profile"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
-  :description "Extensible user profile system for Fluxion."
+  :description "Extensible user profile system."
   :depends-on ("fluxion/user" "babel" "ironclad")
   :serial t
   :components
@@ -237,12 +191,7 @@
     ((:file "profile")))))
 
 (defsystem "fluxion/mail"
-  :name "fluxion-mail"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
   :description "Minimal email sending with pluggable backends."
-  :depends-on ()
   :serial t
   :components
   ((:module "db"
@@ -250,10 +199,6 @@
     ((:file "mail")))))
 
 (defsystem "fluxion/migrate"
-  :name "fluxion-migrate"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
   :description "Versioned schema migrations with sequential execution and rollback."
   :depends-on ("fluxion/db")
   :serial t
@@ -263,12 +208,7 @@
     ((:file "migrate")))))
 
 (defsystem "fluxion/hooks"
-  :name "fluxion-hooks"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
   :description "Inter-module hooks and triggers for event communication."
-  :depends-on ()
   :serial t
   :components
   ((:module "src"
@@ -276,10 +216,6 @@
     ((:file "hooks")))))
 
 (defsystem "fluxion/api"
-  :name "fluxion-api"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
   :description "REST API endpoint system with JSON serialization."
   :depends-on ("fluxion" "cl-json" "babel")
   :serial t
@@ -289,10 +225,6 @@
     ((:file "api")))))
 
 (defsystem "fluxion/log"
-  :name "fluxion-log"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
   :description "Structured, leveled logging with swappable backends."
   :depends-on ("bordeaux-threads")
   :serial t
@@ -302,10 +234,6 @@
     ((:file "log")))))
 
 (defsystem "fluxion/config"
-  :name "fluxion-config"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
   :description "Per-module persistent configuration with s-expression storage."
   :depends-on ("bordeaux-threads")
   :serial t
@@ -315,11 +243,7 @@
     ((:file "config")))))
 
 (defsystem "fluxion/session-db"
-  :name "fluxion-session-db"
-  :version "0.1.0"
-  :author "Glenn Thompson"
-  :licence "MIT"
-  :description "Database-backed session persistence for Fluxion."
+  :description "Database-backed session persistence."
   :depends-on ("fluxion" "fluxion/db")
   :serial t
   :components
@@ -328,9 +252,7 @@
     ((:file "session-store")))))
 
 (defsystem "fluxion/db-tests"
-  :name "fluxion-db-tests"
-  :version "0.1.0"
-  :description "Test suite for the Fluxion database layer."
+  :description "Test suite for the Fluxion database and extension layers."
   :depends-on ("fluxion/db" "fluxion/rdb" "fluxion/db-sqlite"
                "fluxion/session-db" "fluxion/user" "fluxion/auth"
                "fluxion/ban" "fluxion/rate"
@@ -364,8 +286,6 @@
      (:file "test-api")))))
 
 (defsystem "fluxion/db-pg-tests"
-  :name "fluxion-db-pg-tests"
-  :version "0.1.0"
   :description "PostgreSQL contract tests for the Fluxion database layer."
   :depends-on ("fluxion/db-tests" "fluxion/db-pg" "fluxion/db-sqlite")
   :serial t

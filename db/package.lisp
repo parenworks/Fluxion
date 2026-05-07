@@ -67,6 +67,11 @@
    #:iterate
    #:with-transaction
 
+   ;; Convenience
+   #:find-by-id
+   #:delete-by-id
+   #:exists-p
+
    ;; Query DSL (imported and re-exported from fluxion.db.query)
    #:query
    #:compile-query
