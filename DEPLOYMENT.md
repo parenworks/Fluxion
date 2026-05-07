@@ -239,6 +239,78 @@ For production, tune session settings:
 
 The session reaper runs in a background thread and removes expired sessions automatically.
 
+## Database Setup
+
+If your application uses `fluxion/db`, configure the database at startup.
+
+### SQLite (file-backed)
+
+```lisp
+(ql:quickload :fluxion/db-sqlite)
+(fluxion.db:connect
+  (fluxion.db.sqlite:make-sqlite-backend :database "/var/data/app.db"))
+```
+
+For production, ensure the database directory is writable and backed up regularly. SQLite supports concurrent readers but serializes writes, so it works well for moderate traffic.
+
+### PostgreSQL
+
+```lisp
+(ql:quickload :fluxion/db-pg)
+(fluxion.db:connect
+  (fluxion.db.pg:make-pg-backend
+    :database "myapp"
+    :host "localhost"
+    :user "myuser"
+    :password "secret"))
+```
+
+For production, use environment variables for credentials:
+
+```lisp
+(fluxion.db:connect
+  (fluxion.db.pg:make-pg-backend
+    :database (uiop:getenv "DB_NAME")
+    :host (uiop:getenv "DB_HOST")
+    :user (uiop:getenv "DB_USER")
+    :password (uiop:getenv "DB_PASSWORD")))
+```
+
+### Table setup
+
+If your application uses `fluxion/user` or `fluxion/ban`, call their setup functions at startup. These are idempotent:
+
+```lisp
+(fluxion.user:setup)  ; creates users, fields, permissions tables
+(fluxion.ban:setup)   ; creates bans table
+```
+
+## Session Persistence
+
+By default, sessions live in memory. Use `fluxion/session-db` for production deployments where sessions must survive restarts:
+
+```lisp
+(ql:quickload :fluxion/session-db)
+
+(let* ((backend (fluxion.db.sqlite:make-sqlite-backend :database "/var/data/app.db"))
+       (store (fluxion.session.db:make-db-session-store backend)))
+  (fluxion.db:connect backend)
+  (fluxion.server:store-setup store)  ; creates sessions table
+  (let ((app (fluxion.server:make-fluxion-app
+               :port 5000 :session-store store)))
+    ;; Restore sessions from the previous run
+    (fluxion.session.db:restore-sessions app store)
+    (fluxion.server:start app handler)))
+```
+
+Periodic garbage collection removes expired sessions from the database. Run this on a timer or at startup:
+
+```lisp
+(fluxion.server:gc-sessions store 3600)  ; expire sessions older than 1 hour
+```
+
+With session persistence, the CSRF mismatch problem described in Troubleshooting is eliminated - sessions survive restarts and clients keep working.
+
 ## Health Endpoint
 
 Every Fluxion app exposes `GET /health` automatically. No session or authentication required.
@@ -293,6 +365,11 @@ Disable with `:request-log nil` if you handle logging elsewhere.
 - [ ] Health check configured: `curl http://localhost:5000/health`
 - [ ] Request logs piped to a file or log aggregator
 - [ ] Test SSE by opening the browser console and checking for `EventSource` connection
+- [ ] Database configured (if using fluxion/db) with appropriate credentials
+- [ ] Database file/directory writable and backed up (SQLite) or connection pool configured (PostgreSQL)
+- [ ] `fluxion.user:setup` and `fluxion.ban:setup` called at startup (if using those systems)
+- [ ] Session persistence configured (if sessions must survive restarts)
+- [ ] Session garbage collection scheduled
 
 ## Troubleshooting
 

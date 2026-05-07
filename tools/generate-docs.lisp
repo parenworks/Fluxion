@@ -5,7 +5,9 @@
 ;;;; generates API.md from docstrings and type information.
 ;;;;
 ;;;; Usage:
-;;;;   (ql:quickload :fluxion)
+;;;;   (ql:quickload '(:fluxion :fluxion/db-sqlite :fluxion/rdb
+;;;;                   :fluxion/session-db :fluxion/user :fluxion/auth
+;;;;                   :fluxion/ban :fluxion/rate))
 ;;;;   (load "tools/generate-docs.lisp")
 ;;;;   (fluxion.docs:generate)
 
@@ -23,7 +25,10 @@
   '("FLUXION.COMPONENTS" "FLUXION.CELLS" "FLUXION.SERVER"
     "FLUXION.EVENTS" "FLUXION.PROTOCOL" "FLUXION.RENDER"
     "FLUXION.VALIDATION" "FLUXION.CLIENT" "FLUXION"
-    "FLUXION.DB" "FLUXION.DB.QUERY" "FLUXION.DB.MODEL")
+    "FLUXION.DB" "FLUXION.DB.QUERY" "FLUXION.DB.MODEL"
+    "FLUXION.RDB" "FLUXION.SESSION.DB"
+    "FLUXION.USER" "FLUXION.AUTH"
+    "FLUXION.BAN" "FLUXION.RATE")
   "Packages to include in the generated documentation, in order.")
 
 (defparameter *package-descriptions*
@@ -38,7 +43,13 @@
     ("FLUXION" . "Umbrella Package (fluxion / fx) - re-exports key symbols")
     ("FLUXION.DB" . "Database - backend protocol, connection management, collection CRUD, query DSL")
     ("FLUXION.DB.QUERY" . "Query DSL - s-expression query compiler, SQL generation helpers")
-    ("FLUXION.DB.MODEL" . "Data Model - record objects with field access, model-level CRUD"))
+    ("FLUXION.DB.MODEL" . "Data Model - record objects with field access, model-level CRUD")
+    ("FLUXION.RDB" . "Relational Extension - joins between collections, raw SQL queries")
+    ("FLUXION.SESSION.DB" . "Session Persistence - database-backed session store")
+    ("FLUXION.USER" . "User System - accounts, extensible fields, hierarchical permissions")
+    ("FLUXION.AUTH" . "Authentication - login/logout, session-to-user binding, hooks")
+    ("FLUXION.BAN" . "Ban System - IP-based access control with database persistence")
+    ("FLUXION.RATE" . "Rate Limiting - named per-resource limits with per-client tracking"))
   "Human-readable descriptions for each documented package.")
 
 ;;; -------------------------------------------------------

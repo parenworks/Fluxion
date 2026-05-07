@@ -670,6 +670,348 @@ Middleware applies in registration order. Typical ordering:
 
 ---
 
+## Database Patterns
+
+### Connecting to a database
+
+```lisp
+;; Load the SQLite backend
+(ql:quickload :fluxion/db-sqlite)
+
+;; Connect (in-memory for development/testing)
+(fluxion.db:connect
+  (fluxion.db.sqlite:make-sqlite-backend :database ":memory:"))
+
+;; Or a file-backed database for production
+(fluxion.db:connect
+  (fluxion.db.sqlite:make-sqlite-backend :database "/var/data/app.db"))
+
+;; PostgreSQL
+(ql:quickload :fluxion/db-pg)
+(fluxion.db:connect
+  (fluxion.db.pg:make-pg-backend :database "myapp" :host "localhost"
+                                  :user "myuser" :password "secret"))
+```
+
+### Collection CRUD
+
+```lisp
+;; Create a collection
+(fluxion.db:create "posts"
+  '((title :text) (body :text) (author :text) (likes :integer)))
+
+;; Insert
+(fluxion.db:insert "posts"
+  '(("title" . "First Post") ("body" . "Hello!") ("author" . "alice") ("likes" . 0)))
+
+;; Query DSL
+(fluxion.db:select "posts"
+  (fluxion.db:query (:= author "alice")))
+
+;; Compound queries
+(fluxion.db:select "posts"
+  (fluxion.db:query (:and (:= author "alice") (:> likes 5)))
+  :sort '((likes . :desc))
+  :amount 10)
+
+;; Update
+(fluxion.db:update "posts"
+  (fluxion.db:query (:= _id 1))
+  '(("likes" . 42)))
+
+;; Delete
+(fluxion.db:remove "posts"
+  (fluxion.db:query (:= _id 1)))
+```
+
+### Data Models
+
+For object-oriented access, use `fluxion.db.model`:
+
+```lisp
+;; Create a model from scratch
+(let ((post (fluxion.db.model:hull "posts")))
+  (setf (fluxion.db.model:model-field post "title") "My Post")
+  (setf (fluxion.db.model:model-field post "author") "bob")
+  (fluxion.db.model:save post))
+
+;; Query into models
+(let ((posts (fluxion.db.model:get-all "posts"
+               (fluxion.db:query (:= author "alice")))))
+  (dolist (p posts)
+    (format t "~A~%" (fluxion.db.model:model-field p "title"))))
+```
+
+### Joins (fluxion/rdb)
+
+```lisp
+(ql:quickload :fluxion/rdb)
+
+;; Inner join with field selection and sorting
+(rdb:join :inner "users" "orders"
+  :on (:= users._id orders.user_id)
+  :fields '(users.name orders.total)
+  :where (:> orders.total 100)
+  :sort '((orders.total . :desc)))
+
+;; Left join (all users, even those without orders)
+(rdb:join :left "users" "orders"
+  :on (:= users._id orders.user_id))
+
+;; Raw SQL for complex queries
+(rdb:sql "SELECT author, count(*) AS n FROM posts GROUP BY author")
+(rdb:sql-execute "UPDATE posts SET likes = likes + 1 WHERE _id = ?" 42)
+```
+
+### Transactions
+
+```lisp
+(fluxion.db:with-transaction ()
+  (fluxion.db:insert "ledger" '(("account" . "alice") ("amount" . -100)))
+  (fluxion.db:insert "ledger" '(("account" . "bob") ("amount" . 100))))
+;; Both inserts succeed or neither does.
+```
+
+### Backend-agnostic code
+
+Write your application against `fluxion.db` generics. Switch backends at startup:
+
+```lisp
+(defun connect-db (&key (backend :sqlite) (database "app.db"))
+  (ecase backend
+    (:sqlite
+     (ql:quickload :fluxion/db-sqlite)
+     (fluxion.db:connect
+       (fluxion.db.sqlite:make-sqlite-backend :database database)))
+    (:postgresql
+     (ql:quickload :fluxion/db-pg)
+     (fluxion.db:connect
+       (fluxion.db.pg:make-pg-backend :database database)))))
+```
+
+---
+
+## User Accounts and Authentication
+
+### Loading and initialising
+
+```lisp
+(ql:quickload '(:fluxion/db-sqlite :fluxion/user :fluxion/auth))
+
+(fluxion.db:connect (fluxion.db.sqlite:make-sqlite-backend :database "app.db"))
+(fluxion.user:setup)  ; creates users, fields, permissions tables (idempotent)
+```
+
+### Creating users
+
+```lisp
+(fluxion.user:create "alice" :password "secret123"
+  :fields '(("email" . "alice@example.com") ("org" . "acme")))
+
+;; User without password (e.g. OAuth-only accounts)
+(fluxion.user:create "bob")
+```
+
+### Authentication flow
+
+In a login action handler:
+
+```lisp
+(fluxion.components:defaction login-form :submit (c params)
+  (let ((username (cdr (assoc :username params)))
+        (password (cdr (assoc :password params))))
+    (handler-case
+        (progn
+          (fluxion.auth:login username password)
+          (list (fluxion.events:make-redirect-event "/dashboard")))
+      (fluxion.auth:authentication-failed ()
+        (list (fluxion.events:make-script-event
+               "fluxionShowError('Invalid credentials')"))))))
+```
+
+`fluxion.auth:login` verifies the password, binds the user to `*current-session*`, loads permissions into `session-user-roles`, and regenerates the CSRF token.
+
+### Protecting routes
+
+```lisp
+;; Using the router guard
+(fluxion.server:add-route r :get "/dashboard"
+  #'render-dashboard
+  :guard (lambda (session)
+           (fluxion.server:require-auth session)))
+
+;; Inside a handler
+(fluxion.auth:require-authenticated)  ; signals not-authenticated if no user
+```
+
+### Permissions
+
+Permissions are hierarchical strings. A grant of `"admin"` implies `"admin.users"`, `"admin.users.edit"`, etc.
+
+```lisp
+(fluxion.user:grant "alice" "admin")
+(fluxion.user:check "alice" "admin.users.edit")  ; => T
+(fluxion.user:check "alice" "billing")            ; => NIL
+
+;; Default permissions for new users
+(fluxion.user:add-default-permissions "user.read" "user.profile")
+```
+
+### Extensible fields
+
+```lisp
+(fluxion.user:set-field "alice" "theme" "dark")
+(fluxion.user:field "alice" "theme")    ; => "dark"
+(fluxion.user:fields "alice")           ; => (("email" . "...") ("org" . "...") ("theme" . "dark"))
+(fluxion.user:remove-field "alice" "theme")
+```
+
+### Hooks
+
+```lisp
+(setf fluxion.auth:*on-login*
+      (lambda (user session)
+        (log:info "Login: ~A from ~A"
+                  (fluxion.user:user-username user)
+                  (fluxion.server:session-id session))))
+
+(setf fluxion.auth:*on-logout*
+      (lambda (username session)
+        (log:info "Logout: ~A" username)))
+```
+
+---
+
+## Ban System
+
+### Banning and unbanning IPs
+
+```lisp
+(ql:quickload :fluxion/ban)
+(fluxion.ban:setup)  ; creates bans table (idempotent)
+
+;; Permanent ban
+(fluxion.ban:jail "192.168.1.100" :reason "abuse")
+
+;; Timed ban (1 hour)
+(fluxion.ban:jail "10.0.0.5" :duration 3600 :reason "brute force")
+
+;; Check and query
+(fluxion.ban:banned-p "10.0.0.5")   ; => T
+(fluxion.ban:jail-time "10.0.0.5")  ; => seconds remaining, or :permanent
+
+;; Unban
+(fluxion.ban:release "10.0.0.5")
+```
+
+### Middleware integration
+
+Add the ban middleware to reject banned IPs before any request processing:
+
+```lisp
+(add-middleware app (fluxion.ban:make-ban-middleware) :name :bans)
+```
+
+Typical middleware ordering with bans:
+
+```lisp
+(add-middleware app (make-cors-middleware) :name :cors)
+(add-middleware app (make-request-logger) :name :logger)
+(add-middleware app (fluxion.ban:make-ban-middleware) :name :bans)
+(add-middleware app (make-rate-limiter :requests-per-second 20) :name :limiter)
+```
+
+### Maintenance
+
+```lisp
+;; List all active bans
+(fluxion.ban:list-bans)
+
+;; Clean up expired timed bans
+(fluxion.ban:clear-expired)
+```
+
+---
+
+## Granular Rate Limiting
+
+The core framework's `make-rate-limiter` provides global rate limiting. `fluxion/rate` adds named, per-resource limits with per-client tracking.
+
+### Defining limits
+
+```lisp
+(ql:quickload :fluxion/rate)
+
+;; 5 login attempts per 60 seconds per IP
+(fluxion.rate:define-limit :login
+  :window 60 :max-requests 5
+  :key-fn #'fluxion.rate:client-ip)
+
+;; 100 API calls per 60 seconds per authenticated user
+(fluxion.rate:define-limit :api
+  :window 60 :max-requests 100
+  :key-fn #'fluxion.rate:client-user)
+
+;; Custom on-exceeded handler
+(fluxion.rate:define-limit :upload
+  :window 300 :max-requests 10
+  :on-exceeded (lambda (env)
+                 (declare (ignore env))
+                 '(503 (:content-type "text/plain") ("Upload limit reached"))))
+```
+
+### Using in handlers
+
+```lisp
+;; Macro form - returns 429 automatically when exceeded
+(fluxion.rate:with-limitation (:login env)
+  (handle-login-request ...))
+
+;; Programmatic check
+(multiple-value-bind (allowed remaining retry-after)
+    (fluxion.rate:check-limit :login env)
+  (if allowed
+      (handle-request ...)
+      (format nil "Try again in ~D seconds" retry-after)))
+
+;; Query remaining without consuming
+(fluxion.rate:left :api env)  ; => 87
+```
+
+### Key extractors
+
+- `fluxion.rate:client-ip` - extract `:remote-addr` from env (default)
+- `fluxion.rate:client-session` - use session ID for per-session limiting
+- `fluxion.rate:client-user` - use authenticated user ID for per-user limiting
+
+---
+
+## Session Persistence
+
+By default, sessions live in memory and are lost on restart. For production, use `fluxion/session-db` to persist sessions to the database.
+
+```lisp
+(ql:quickload '(:fluxion/db-sqlite :fluxion/session-db))
+
+(let* ((backend (fluxion.db.sqlite:make-sqlite-backend :database "app.db"))
+       (store (fluxion.session.db:make-db-session-store backend)))
+  (fluxion.db:connect backend)
+  (fluxion.server:store-setup store)
+  (let ((app (fluxion.server:make-fluxion-app :session-store store)))
+    ;; On startup, restore sessions from the database
+    (fluxion.session.db:restore-sessions app store)
+    ;; Sessions are now automatically persisted
+    (fluxion.server:start app handler)))
+```
+
+Session garbage collection removes expired sessions from the database:
+
+```lisp
+(fluxion.server:gc-sessions store 3600)  ; remove sessions older than 1 hour
+```
+
+---
+
 ## Troubleshooting
 
 **SSE connections drop immediately:** Check your reverse proxy config. nginx needs `proxy_buffering off` and a long `proxy_read_timeout`. Caddy works without changes.
@@ -678,7 +1020,7 @@ Middleware applies in registration order. Typical ordering:
 
 **CSRF 403 on POST:** Make sure you pass `:csrf-token` to `render-page`. The client reads the token from a `<meta name="fluxion-csrf">` tag.
 
-**Component not updating:** If the slot is cell-backed, return `'()` from the action (not `nil`). `nil` means "auto-patch the component", which duplicates the cell watcher's patch. `'()` means "I returned an empty event list, do nothing" — the cell handles it.
+**Component not updating:** If the slot is cell-backed, return `'()` from the action (not `nil`). `nil` means "auto-patch the component", which duplicates the cell watcher's patch. `'()` means "I returned an empty event list, do nothing" - the cell handles it.
 
 **Computed cell not recomputing:** Dependencies are tracked by which cells are read during the compute function. If you read a cell conditionally, it won't be tracked on runs where the branch isn't taken. Keep compute functions deterministic in their reads.
 
