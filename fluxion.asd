@@ -249,6 +249,32 @@
     :components
     ((:file "mail")))))
 
+(defsystem "fluxion/migrate"
+  :name "fluxion-migrate"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Versioned schema migrations with sequential execution and rollback."
+  :depends-on ("fluxion/db")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "migrate")))))
+
+(defsystem "fluxion/hooks"
+  :name "fluxion-hooks"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Inter-module hooks and triggers for event communication."
+  :depends-on ()
+  :serial t
+  :components
+  ((:module "src"
+    :components
+    ((:file "hooks")))))
+
 (defsystem "fluxion/session-db"
   :name "fluxion-session-db"
   :version "0.1.0"
@@ -270,6 +296,7 @@
                "fluxion/session-db" "fluxion/user" "fluxion/auth"
                "fluxion/ban" "fluxion/rate"
                "fluxion/cache" "fluxion/profile" "fluxion/mail"
+               "fluxion/migrate" "fluxion/hooks"
                "fiveam")
   :serial t
   :components
@@ -288,7 +315,9 @@
      (:file "test-rate")
      (:file "test-cache")
      (:file "test-profile")
-     (:file "test-mail")))))
+     (:file "test-mail")
+     (:file "test-migrate")
+     (:file "test-hooks")))))
 
 (defsystem "fluxion/db-pg-tests"
   :name "fluxion-db-pg-tests"
