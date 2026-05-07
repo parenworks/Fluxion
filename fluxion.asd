@@ -184,6 +184,32 @@
     :components
     ((:file "auth")))))
 
+(defsystem "fluxion/ban"
+  :name "fluxion-ban"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "IP-based ban system for Fluxion with database persistence."
+  :depends-on ("fluxion/db")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "ban")))))
+
+(defsystem "fluxion/rate"
+  :name "fluxion-rate"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Granular per-resource rate limiting for Fluxion."
+  :depends-on ("bordeaux-threads")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "rate")))))
+
 (defsystem "fluxion/session-db"
   :name "fluxion-session-db"
   :version "0.1.0"
@@ -202,7 +228,8 @@
   :version "0.1.0"
   :description "Test suite for the Fluxion database layer."
   :depends-on ("fluxion/db" "fluxion/rdb" "fluxion/db-sqlite"
-               "fluxion/session-db" "fluxion/user" "fluxion/auth" "fiveam")
+               "fluxion/session-db" "fluxion/user" "fluxion/auth"
+               "fluxion/ban" "fluxion/rate" "fiveam")
   :serial t
   :components
   ((:module "tests"
@@ -215,7 +242,9 @@
      (:file "test-rdb")
      (:file "test-session-store")
      (:file "test-user")
-     (:file "test-auth")))))
+     (:file "test-auth")
+     (:file "test-ban")
+     (:file "test-rate")))))
 
 (defsystem "fluxion/db-pg-tests"
   :name "fluxion-db-pg-tests"
