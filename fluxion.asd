@@ -275,6 +275,32 @@
     :components
     ((:file "hooks")))))
 
+(defsystem "fluxion/log"
+  :name "fluxion-log"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Structured, leveled logging with swappable backends."
+  :depends-on ("bordeaux-threads")
+  :serial t
+  :components
+  ((:module "src"
+    :components
+    ((:file "log")))))
+
+(defsystem "fluxion/config"
+  :name "fluxion-config"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Per-module persistent configuration with s-expression storage."
+  :depends-on ("bordeaux-threads")
+  :serial t
+  :components
+  ((:module "src"
+    :components
+    ((:file "config")))))
+
 (defsystem "fluxion/session-db"
   :name "fluxion-session-db"
   :version "0.1.0"
@@ -297,6 +323,7 @@
                "fluxion/ban" "fluxion/rate"
                "fluxion/cache" "fluxion/profile" "fluxion/mail"
                "fluxion/migrate" "fluxion/hooks"
+               "fluxion/log" "fluxion/config"
                "fiveam")
   :serial t
   :components
@@ -317,7 +344,9 @@
      (:file "test-profile")
      (:file "test-mail")
      (:file "test-migrate")
-     (:file "test-hooks")))))
+     (:file "test-hooks")
+     (:file "test-log")
+     (:file "test-config")))))
 
 (defsystem "fluxion/db-pg-tests"
   :name "fluxion-db-pg-tests"
