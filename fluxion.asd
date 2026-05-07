@@ -275,6 +275,19 @@
     :components
     ((:file "hooks")))))
 
+(defsystem "fluxion/api"
+  :name "fluxion-api"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "REST API endpoint system with JSON serialization."
+  :depends-on ("fluxion" "cl-json" "babel")
+  :serial t
+  :components
+  ((:module "src"
+    :components
+    ((:file "api")))))
+
 (defsystem "fluxion/log"
   :name "fluxion-log"
   :version "0.1.0"
@@ -324,6 +337,7 @@
                "fluxion/cache" "fluxion/profile" "fluxion/mail"
                "fluxion/migrate" "fluxion/hooks"
                "fluxion/log" "fluxion/config"
+               "fluxion/api"
                "fiveam")
   :serial t
   :components
@@ -346,7 +360,8 @@
      (:file "test-migrate")
      (:file "test-hooks")
      (:file "test-log")
-     (:file "test-config")))))
+     (:file "test-config")
+     (:file "test-api")))))
 
 (defsystem "fluxion/db-pg-tests"
   :name "fluxion-db-pg-tests"
