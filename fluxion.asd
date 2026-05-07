@@ -210,6 +210,45 @@
     :components
     ((:file "rate")))))
 
+(defsystem "fluxion/cache"
+  :name "fluxion-cache"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Named caching interface with TTL and multiple backends."
+  :depends-on ("fluxion/db" "bordeaux-threads" "babel" "ironclad")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "cache")))))
+
+(defsystem "fluxion/profile"
+  :name "fluxion-profile"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Extensible user profile system for Fluxion."
+  :depends-on ("fluxion/user" "babel" "ironclad")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "profile")))))
+
+(defsystem "fluxion/mail"
+  :name "fluxion-mail"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Minimal email sending with pluggable backends."
+  :depends-on ()
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "mail")))))
+
 (defsystem "fluxion/session-db"
   :name "fluxion-session-db"
   :version "0.1.0"
@@ -229,7 +268,9 @@
   :description "Test suite for the Fluxion database layer."
   :depends-on ("fluxion/db" "fluxion/rdb" "fluxion/db-sqlite"
                "fluxion/session-db" "fluxion/user" "fluxion/auth"
-               "fluxion/ban" "fluxion/rate" "fiveam")
+               "fluxion/ban" "fluxion/rate"
+               "fluxion/cache" "fluxion/profile" "fluxion/mail"
+               "fiveam")
   :serial t
   :components
   ((:module "tests"
@@ -244,7 +285,10 @@
      (:file "test-user")
      (:file "test-auth")
      (:file "test-ban")
-     (:file "test-rate")))))
+     (:file "test-rate")
+     (:file "test-cache")
+     (:file "test-profile")
+     (:file "test-mail")))))
 
 (defsystem "fluxion/db-pg-tests"
   :name "fluxion-db-pg-tests"

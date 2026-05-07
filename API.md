@@ -790,6 +790,143 @@ Returns a list of SSE events suitable for returning from an action handler.
 
 ---
 
+## Client - Parenscript runtime compilation
+
+Package: `fluxion.client`
+
+### Functions
+
+**`build-client (&key (output-path (system-relative-pathname fluxion static/fluxion.js)))`** - Compile the Fluxion Parenscript runtime and write it to OUTPUT-PATH.
+
+**`client-js-string ()`** - Return the Fluxion browser runtime as a JavaScript string.
+
+---
+
+## Umbrella Package (fluxion / fx) - re-exports key symbols
+
+Package: `fluxion`
+
+This package re-exports symbols from other Fluxion packages for convenience. All symbols below are documented in full under their home package.
+
+### From `fluxion.cells`
+
+- `cell`
+- `cell-name`
+- `cell-value`
+- `computed-cell`
+- `connect`
+- `disconnect`
+- `fire-propagator`
+- `make-cell`
+- `make-computed`
+- `make-propagator`
+- `propagator`
+- `recompute`
+- `remove-propagator`
+- `unwatch`
+- `watch`
+- `with-cell-lock`
+- `with-transaction`
+
+### From `fluxion.components`
+
+- `add-child`
+- `clear-dirty`
+- `component`
+- `component-children`
+- `component-connected`
+- `component-id`
+- `component-mounted`
+- `component-parent`
+- `component-root`
+- `component-selector`
+- `component-session`
+- `component-unmounted`
+- `defaction`
+- `defcomponent`
+- `find-child`
+- `handle-action`
+- `mark-dirty`
+- `patch-component`
+- `remove-child`
+- `render`
+
+### From `fluxion.events`
+
+- `make-append-event`
+- `make-patch-event`
+- `make-prepend-event`
+- `make-redirect-event`
+- `make-remove-event`
+- `make-script-event`
+- `make-signal-event`
+
+### From `fluxion.protocol`
+
+- `format-sse-event`
+- `write-sse-event`
+
+### From `fluxion.render`
+
+- `csrf-meta-tag`
+- `fluxion-script-tag`
+- `render-page`
+- `render-to-string`
+
+### From `fluxion.server`
+
+- `*current-session*`
+- `add-middleware`
+- `add-route`
+- `app-handler`
+- `app-session-lock`
+- `app-sessions`
+- `authenticate`
+- `authenticated-p`
+- `clear-middleware`
+- `defroute`
+- `dispatch-route`
+- `find-component`
+- `fluxion-app`
+- `has-role-p`
+- `logout`
+- `make-cors-middleware`
+- `make-fluxion-app`
+- `make-rate-limiter`
+- `make-request-logger`
+- `make-router`
+- `patch`
+- `push-component-patch`
+- `push-event`
+- `push-events`
+- `register-action`
+- `register-component`
+- `register-component-factory`
+- `remove-middleware`
+- `require-auth`
+- `require-role`
+- `router`
+- `router-handler`
+- `send-event`
+- `session`
+- `session-component`
+- `session-csrf-token`
+- `session-user`
+- `session-user-roles`
+- `start`
+- `stop`
+
+### From `fluxion.validation`
+
+- `clear-error-events`
+- `errors-alist`
+- `field-error`
+- `valid-p`
+- `validate`
+- `validation-error-events`
+
+---
+
 ## Database - backend protocol, connection management, collection CRUD, query DSL
 
 Package: `fluxion.db`

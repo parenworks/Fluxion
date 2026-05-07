@@ -5,7 +5,8 @@
 ;;;; generates API.md from docstrings and type information.
 ;;;;
 ;;;; Usage:
-;;;;   (ql:quickload '(:fluxion :fluxion/db-sqlite :fluxion/rdb
+;;;;   (ql:quickload '(:fluxion :fluxion/client
+;;;;                   :fluxion/db-sqlite :fluxion/rdb
 ;;;;                   :fluxion/session-db :fluxion/user :fluxion/auth
 ;;;;                   :fluxion/ban :fluxion/rate))
 ;;;;   (load "tools/generate-docs.lisp")
@@ -218,6 +219,32 @@
     (:variable "Variables")
     (t "Other")))
 
+(defparameter *umbrella-packages*
+  '("FLUXION")
+  "Packages whose symbols are all re-exports. Documented as a reference table.")
+
+(defun write-umbrella-section (stream pkg-name)
+  "Write documentation for an umbrella package as a grouped re-export table."
+  (let ((pkg (find-package pkg-name))
+        (groups (make-hash-table :test #'equal)))
+    (when pkg
+      (do-external-symbols (sym pkg)
+        (let ((home (package-name (symbol-package sym))))
+          (push sym (gethash home groups))))
+      (write-package-header stream pkg-name)
+      (format stream "This package re-exports symbols from other Fluxion packages ")
+      (format stream "for convenience. All symbols below are documented in full ")
+      (format stream "under their home package.~%~%")
+      (let ((sorted-homes (sort (loop for k being the hash-keys of groups collect k)
+                                #'string<)))
+        (dolist (home sorted-homes)
+          (let ((syms (sort (gethash home groups) #'string< :key #'symbol-name)))
+            (format stream "### From `~(~A~)`~%~%" home)
+            (dolist (sym syms)
+              (format stream "- `~(~A~)`~%" (symbol-name sym)))
+            (format stream "~%"))))
+      (format stream "---~%~%"))))
+
 ;;; -------------------------------------------------------
 ;;; Public API
 ;;; -------------------------------------------------------
@@ -227,20 +254,22 @@
   (with-output-to-string (s)
     (write-header s)
     (dolist (pkg-name *packages-to-document*)
-      (let ((symbols (collect-symbols pkg-name)))
-        (when symbols
-          (write-package-header s pkg-name)
-          ;; Group by type, skip heading for types that emit their own headings
-          (let ((current-type nil))
-            (dolist (entry symbols)
-              (let ((sym (car entry))
-                    (type (cdr entry)))
-                (unless (eq type current-type)
-                  (setf current-type type)
-                  (unless (member type '(:class :condition))
-                    (format s "### ~A~%~%" (type-heading type))))
-                (write-symbol-entry s sym type))))
-          (format s "---~%~%"))))))
+      (if (member pkg-name *umbrella-packages* :test #'string=)
+          (write-umbrella-section s pkg-name)
+          (let ((symbols (collect-symbols pkg-name)))
+            (when symbols
+              (write-package-header s pkg-name)
+              ;; Group by type, skip heading for types that emit their own headings
+              (let ((current-type nil))
+                (dolist (entry symbols)
+                  (let ((sym (car entry))
+                        (type (cdr entry)))
+                    (unless (eq type current-type)
+                      (setf current-type type)
+                      (unless (member type '(:class :condition))
+                        (format s "### ~A~%~%" (type-heading type))))
+                    (write-symbol-entry s sym type))))
+              (format s "---~%~%")))))))
 
 (defun generate (&key (output-path nil))
   "Generate API.md from live package introspection.
