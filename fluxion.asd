@@ -99,3 +99,62 @@
      (:file "todo")
      (:file "converter")
      (:file "colour-picker")))))
+
+(defsystem "fluxion/db"
+  :name "fluxion-db"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "Database abstraction layer for Fluxion. Query DSL, data model, and backend protocol."
+  :depends-on ("alexandria")
+  :serial t
+  :components
+  ((:module "db"
+    :serial t
+    :components
+    ((:file "package")
+     (:file "conditions")
+     (:file "query")
+     (:file "backend")
+     (:file "model")))))
+
+(defsystem "fluxion/db-sqlite"
+  :name "fluxion-db-sqlite"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "SQLite backend for the Fluxion database layer."
+  :depends-on ("fluxion/db" "sqlite")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "sqlite")))))
+
+(defsystem "fluxion/db-pg"
+  :name "fluxion-db-postgresql"
+  :version "0.1.0"
+  :author "Glenn Thompson"
+  :licence "MIT"
+  :description "PostgreSQL backend for the Fluxion database layer."
+  :depends-on ("fluxion/db" "postmodern")
+  :serial t
+  :components
+  ((:module "db"
+    :components
+    ((:file "postgresql")))))
+
+(defsystem "fluxion/db-tests"
+  :name "fluxion-db-tests"
+  :version "0.1.0"
+  :description "Test suite for the Fluxion database layer."
+  :depends-on ("fluxion/db" "fluxion/db-sqlite" "fiveam")
+  :serial t
+  :components
+  ((:module "tests"
+    :serial t
+    :components
+    ((:file "test-db-package")
+     (:file "test-db-query")
+     (:file "test-db-contract")
+     (:file "test-db-model")))))

@@ -22,7 +22,8 @@
 (defparameter *packages-to-document*
   '("FLUXION.COMPONENTS" "FLUXION.CELLS" "FLUXION.SERVER"
     "FLUXION.EVENTS" "FLUXION.PROTOCOL" "FLUXION.RENDER"
-    "FLUXION.VALIDATION" "FLUXION.CLIENT" "FLUXION")
+    "FLUXION.VALIDATION" "FLUXION.CLIENT" "FLUXION"
+    "FLUXION.DB" "FLUXION.DB.QUERY" "FLUXION.DB.MODEL")
   "Packages to include in the generated documentation, in order.")
 
 (defparameter *package-descriptions*
@@ -34,7 +35,10 @@
     ("FLUXION.RENDER" . "Render - HTML page rendering helpers")
     ("FLUXION.VALIDATION" . "Validation - server-side form validation")
     ("FLUXION.CLIENT" . "Client - Parenscript runtime compilation")
-    ("FLUXION" . "Umbrella Package (fluxion / fx) - re-exports key symbols"))
+    ("FLUXION" . "Umbrella Package (fluxion / fx) - re-exports key symbols")
+    ("FLUXION.DB" . "Database - backend protocol, connection management, collection CRUD, query DSL")
+    ("FLUXION.DB.QUERY" . "Query DSL - s-expression query compiler, SQL generation helpers")
+    ("FLUXION.DB.MODEL" . "Data Model - record objects with field access, model-level CRUD"))
   "Human-readable descriptions for each documented package.")
 
 ;;; -------------------------------------------------------
