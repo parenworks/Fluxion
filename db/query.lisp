@@ -27,12 +27,11 @@
 
 (defun field-name-sql (field)
   "Convert a field name (symbol or string) to a SQL column name string.
-Symbols are lowercased and hyphens become underscores."
-  (let ((name (etypecase field
-                (symbol (string-downcase (symbol-name field)))
-                (string field))))
-    ;; Convert hyphens to underscores for SQL compatibility
-    (substitute #\_ #\- name)))
+Symbols are lowercased and hyphens become underscores.
+Strings are used verbatim (for literal column names with hyphens)."
+  (etypecase field
+    (symbol (substitute #\_ #\- (string-downcase (symbol-name field))))
+    (string field)))
 
 (defun quote-identifier (name)
   "Quote a SQL identifier (table or column name) with double quotes.

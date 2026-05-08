@@ -86,8 +86,10 @@
     ;; Plist check: starts with keyword
     ((and (listp data) (keywordp (car data)))
      (encode-plist-as-json data stream))
-    ;; Alist check: list of conses
-    ((and (listp data) (consp (car data)))
+    ;; Alist check: list of conses with string/symbol keys
+    ((and (listp data) (consp (car data))
+          (let ((k (caar data)))
+            (or (stringp k) (symbolp k))))
      (encode-alist-as-json data stream))
     ;; Plain list -> JSON array
     ((listp data)
@@ -258,7 +260,7 @@ RATE-LIMIT is an optional rate limit name (for fluxion.rate integration)."
              (when auth-pkg
                (let ((current-fn (find-symbol "CURRENT" auth-pkg)))
                  (when (and current-fn (fboundp current-fn))
-                   (unless (funcall current-fn session)
+                   (unless (funcall current-fn)
                      (return-from endpoint-handler
                        *auth-failure-response*)))))))
          ;; Rate limit check

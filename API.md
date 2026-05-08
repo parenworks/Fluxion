@@ -1357,6 +1357,7 @@ Returns (sql-string . parameter-list).
 
 **`field-name-sql (field)`** - Convert a field name (symbol or string) to a SQL column name string.
 Symbols are lowercased and hyphens become underscores.
+Strings are used verbatim (for literal column names with hyphens).
 
 **`field-type-sql (type)`** - Convert a portable field type keyword to SQL type string.
 
