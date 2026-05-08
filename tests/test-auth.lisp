@@ -63,7 +63,7 @@
       (fluxion.auth:login "alice" "anything"))))
 
 (test auth-login-sets-roles
-  "Login populates session-user-roles from permissions"
+  "Login populates session-user-roles as keywords from permissions"
   (with-auth-db
     (fluxion.user:create "alice" :password "pass")
     (fluxion.user:grant "alice" "admin")
@@ -72,8 +72,8 @@
     (let ((roles (fluxion.server:session-user-roles
                   fluxion.server:*current-session*)))
       (is (= 2 (length roles)))
-      (is (member "admin" roles :test #'string=))
-      (is (member "editor" roles :test #'string=)))))
+      (is (member :admin roles))
+      (is (member :editor roles)))))
 
 (test auth-login-regenerates-csrf
   "Login regenerates the CSRF token"

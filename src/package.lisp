@@ -196,6 +196,7 @@
    #:push-events
    #:push-component-patch
    #:parse-request-body
+   #:parse-form-body
    #:app-session-ttl
    #:app-reaper-interval
    #:reap-sessions

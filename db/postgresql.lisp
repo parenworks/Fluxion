@@ -46,7 +46,10 @@
             :documentation "SSL mode (:no, :yes, :try).")
    (connection :initform nil
                :accessor backend-connection
-               :documentation "Active Postmodern connection."))
+               :documentation "Active Postmodern connection.")
+   (lock :initform (bt:make-lock "pg-backend")
+         :accessor backend-lock
+         :documentation "Lock to serialize access to the single connection."))
   (:documentation "PostgreSQL database backend for Fluxion using Postmodern."))
 
 (defun make-postgresql-backend (&key (database "fluxion") (user "postgres")
@@ -122,9 +125,13 @@ Returns the converted SQL string."
       (error 'db:connection-failed :message "PostgreSQL backend not connected")))
 
 (defmacro with-pg-conn (backend &body body)
-  "Execute BODY with *database* bound to BACKEND's connection."
-  `(let ((pomo:*database* (%ensure-conn ,backend)))
-     ,@body))
+  "Execute BODY with *database* bound to BACKEND's connection.
+Serializes access via the backend lock to prevent concurrent query errors."
+  (let ((b (gensym "BACKEND")))
+    `(let ((,b ,backend))
+       (bt:with-lock-held ((backend-lock ,b))
+         (let ((pomo:*database* (%ensure-conn ,b)))
+           ,@body)))))
 
 ;;; -------------------------------------------------------
 ;;; SQL execution helpers

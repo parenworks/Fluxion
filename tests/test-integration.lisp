@@ -163,6 +163,45 @@
              (is (search "javascript" ct)))))
     (stop-test-server)))
 
+(test integration-favicon-serves-from-static
+  "GET /favicon.ico serves a favicon when one exists in the static dir."
+  (unwind-protect
+       (progn
+         (start-test-server)
+         ;; Create a test favicon.svg in the static dir
+         (let ((favicon-path (merge-pathnames "favicon.svg"
+                               (asdf:system-relative-pathname "fluxion" "static/"))))
+           (with-open-file (f favicon-path :direction :output
+                                           :if-exists :supersede)
+             (write-string "<svg xmlns='http://www.w3.org/2000/svg'/>" f))
+           (unwind-protect
+                (multiple-value-bind (body status headers)
+                    (dex:get (test-url "/favicon.ico"))
+                  (is (= 200 status))
+                  (let ((ct (gethash "content-type" headers)))
+                    (is (search "svg" ct))))
+             (delete-file favicon-path))))
+    (stop-test-server)))
+
+(test integration-favicon-404-when-missing
+  "GET /favicon.ico returns 404 when no favicon exists in static dir."
+  (unwind-protect
+       (progn
+         (start-test-server)
+         ;; Ensure no favicon files exist
+         (let ((static-dir (asdf:system-relative-pathname "fluxion" "static/")))
+           (dolist (name '("favicon.ico" "favicon.svg" "favicon.png"))
+             (let ((p (merge-pathnames name static-dir)))
+               (when (probe-file p) (delete-file p)))))
+         (handler-case
+             (multiple-value-bind (body status)
+                 (dex:get (test-url "/favicon.ico"))
+               (declare (ignore body))
+               (is (= 404 status)))
+           (dex:http-request-not-found ()
+             (pass "Got 404 as expected"))))
+    (stop-test-server)))
+
 (test integration-csrf-rejection
   "POST /action/... without CSRF token returns 403."
   (unwind-protect

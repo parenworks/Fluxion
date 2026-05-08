@@ -118,10 +118,51 @@ terminates cleanly and does not steal events from the new connection."
     (when headers
       (gethash "x-csrf-token" headers))))
 
+(defun read-body-as-string (env)
+  "Read :raw-body from ENV into a string. Caches result in :fluxion-body-string.
+Handles both stream and string bodies. Uses nconc to mutate the shared ENV list."
+  (or (getf env :fluxion-body-string)
+      (let ((body (getf env :raw-body)))
+        (when body
+          (let ((s (handler-case
+                       (if (stringp body)
+                           body
+                           (when (streamp body)
+                             (let ((buf (make-array 4096 :element-type '(unsigned-byte 8)
+                                                         :adjustable t :fill-pointer 0)))
+                               (loop for byte = (read-byte body nil nil)
+                                     while byte do (vector-push-extend byte buf))
+                               (babel:octets-to-string buf :encoding :utf-8))))
+                     (error () nil))))
+            (when s
+              (nconc env (list :fluxion-body-string s)))
+            s)))))
+
+(defun parse-form-body (env)
+  "Parse a URL-encoded form body from ENV, returning an alist of string pairs.
+Caches the raw body string on ENV so the stream only needs to be read once."
+  (let ((content-type (getf env :content-type)))
+    (when (and content-type
+               (search "application/x-www-form-urlencoded" content-type))
+      (let ((body-string (read-body-as-string env)))
+        (when (and body-string (plusp (length body-string)))
+          (loop for pair in (cl-ppcre:split "&" body-string)
+                for kv = (cl-ppcre:split "=" pair :limit 2)
+                when (= (length kv) 2)
+                collect (cons (quri:url-decode (first kv))
+                              (quri:url-decode (second kv)))))))))
+
 (defun csrf-valid-p (session env)
-  "Return T if the CSRF token in the request matches the session's token."
-  (let ((request-token (get-csrf-header env))
-        (session-token (session-csrf-token session)))
+  "Return T if the CSRF token in the request matches the session's token.
+Checks both the X-CSRF-Token header (for XHR) and the _csrf form parameter (for HTML forms)."
+  (let* ((header-token (get-csrf-header env))
+         (form-params (unless header-token (parse-form-body env)))
+         (form-token (when form-params
+                       (cdr (assoc "_csrf" form-params :test #'string=))))
+         (request-token (or header-token form-token))
+         (session-token (session-csrf-token session)))
+    (when form-params
+      (nconc env (list :fluxion-form-params form-params)))
     (and request-token
          session-token
          (string= request-token session-token))))

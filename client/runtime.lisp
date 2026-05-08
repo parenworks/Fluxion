@@ -34,6 +34,20 @@
     (defvar *fluxion-sse-base-delay* 1000)
     (defvar *fluxion-sse-max-delay* 30000)
     (defvar *fluxion-sse-was-connected* false)
+    (defvar *fluxion-navigate-callbacks* (array))
+
+    (defun fluxion-on-navigate (callback)
+      "Register a CALLBACK to be invoked after SPA content navigation.
+CALLBACK receives the container element that was updated."
+      (chain *fluxion-navigate-callbacks* (push callback)))
+
+    (defun fluxion-navigated (container)
+      "Notify Fluxion that SPA navigation has occurred on CONTAINER.
+Re-binds actions and text bindings, then invokes registered callbacks."
+      (fluxion-bind-actions container)
+      (fluxion-update-text-bindings)
+      (chain *fluxion-navigate-callbacks* (for-each
+        (lambda (cb) (funcall cb container)))))
 
     (defun fluxion-get-csrf-token ()
       "Read the CSRF token from the meta tag in the page head."

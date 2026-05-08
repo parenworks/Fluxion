@@ -571,6 +571,9 @@ SKIP-HEALTH: when T, omit GET /health from the log.
 
 **`make-router (&key not-found-handler)`** - Create a new router instance.
 
+**`parse-form-body (env)`** - Parse a URL-encoded form body from ENV, returning an alist of string pairs.
+Caches the raw body string on ENV so the stream only needs to be read once.
+
 **`patch (stream component &key (mode morph))`** - Convenience: render COMPONENT and write a patch event to STREAM.
 
 **`push-event (session event)`** - Push an SSE event to a session's persistent SSE connection.
@@ -787,6 +790,190 @@ Defaults to "#error-{field-name}".
 CLASS is the CSS class added to the error element (default: "field-error").
 
 Returns a list of SSE events suitable for returning from an action handler.
+
+---
+
+## Hooks - inter-module event communication with triggers, priorities, and switches
+
+Package: `fluxion.hooks`
+
+### Class: `hook-not-found`
+
+Slots:
+
+- **`name`**
+
+### Class: `trigger-error`
+
+Slots:
+
+- **`hook`**
+- **`trigger`**
+- **`cause`**
+
+### Functions
+
+**`add-trigger (hook-name trigger-name &key (priority 0) handler)`** - Register a trigger on a hook.
+HOOK-NAME is the hook to attach to.
+TRIGGER-NAME is a unique identifier for this trigger.
+PRIORITY controls execution order (lower runs first).
+HANDLER is a function that receives the hook's arguments.
+
+**`all-hooks ()`** - Return a list of all defined hook-def structs.
+
+**`clear-all ()`** - Remove all hooks and triggers.
+
+**`define-hook (name &key (description ) (args 'nil))`** - Define a named hook (extension point).
+NAME is a keyword symbol identifying the hook.
+DESCRIPTION documents what the hook does.
+ARGS is a list of argument names for documentation.
+
+**`disable-trigger (hook-name trigger-name)`** - Disable a trigger without removing it.
+
+**`enable-trigger (hook-name trigger-name)`** - Enable a previously disabled trigger.
+
+**`hook-defined-p (name)`** - Return T if a hook with NAME is defined.
+
+**`hook-info (name)`** - Return the hook-def struct for NAME, or NIL.
+
+**`remove-trigger (hook-name trigger-name)`** - Remove a trigger from a hook.
+
+**`trigger (hook-name &rest args)`** - Fire a hook, running all enabled triggers in priority order.
+Returns the result of the last trigger, or NIL if none ran.
+Signals TRIGGER-ERROR if a handler fails.
+
+**`trigger-collect (hook-name &rest args)`** - Fire a hook and collect results from all enabled triggers.
+Returns a list of (trigger-name . result) pairs.
+
+**`triggers-for (hook-name)`** - Return the list of trigger-def structs for a hook, sorted by priority.
+
+**`undefine-hook (name)`** - Remove a hook definition and all its triggers.
+
+---
+
+## Log - structured logging with categories and levels
+
+Package: `fluxion.log`
+
+### Class: `file-log-backend`
+
+Log backend that writes to a file with size-based rotation.
+
+Slots:
+
+- **`path`**
+- **`max-size`**
+- **`max-files`**
+- **`lock`**
+- **`stream`**
+
+### Class: `log-backend`
+
+Abstract base class for log backends.
+
+### Class: `log-entry`
+
+A structured log entry.
+
+Slots:
+
+- **`level`**
+- **`category`**
+- **`message`**
+- **`timestamp`**
+- **`data`**
+
+### Class: `multi-log-backend`
+
+Log backend that writes to multiple backends.
+
+Slots:
+
+- **`backends`**
+
+### Class: `null-log-backend`
+
+Log backend that discards all messages.
+
+### Class: `stream-log-backend`
+
+Log backend that writes formatted text to a stream.
+
+Slots:
+
+- **`stream`**
+- **`lock`**
+
+### Generic Functions
+
+**`backend-write (backend entry)`** - Write a log entry to the backend.
+
+### Functions
+
+**`debug (format-string &rest args)`** - Log a message at DEBUG level.
+The last keyword arguments :category and :data are extracted if present.
+
+**`error (format-string &rest args)`** - Log a message at ERROR level.
+The last keyword arguments :category and :data are extracted if present.
+
+**`fatal (format-string &rest args)`** - Log a message at FATAL level.
+The last keyword arguments :category and :data are extracted if present.
+
+**`info (format-string &rest args)`** - Log a message at INFO level.
+The last keyword arguments :category and :data are extracted if present.
+
+**`level-value (level)`** - Return the numeric severity of LEVEL. Higher = more severe.
+
+**`log (level message &key category data)`** - Log a message at LEVEL.
+CATEGORY is an optional keyword for filtering.
+DATA is a plist of structured key-value pairs.
+
+**`make-file-log-backend (path &key (max-size (* 10 1024 1024)) (max-files 5))`** - Create a file log backend.
+PATH is the log file path.
+MAX-SIZE is the maximum file size before rotation (default 10MB).
+MAX-FILES is the number of rotated files to keep (default 5).
+
+**`make-multi-log-backend (&rest backends)`** - Create a multi backend that fans out to all given backends.
+
+**`make-null-log-backend ()`** - Create a null log backend.
+
+**`make-stream-log-backend (&key (stream *standard-output*))`** - Create a stream log backend.
+
+**`set-category-level (category level)`** - Set the minimum log level for a specific CATEGORY.
+Pass NIL as LEVEL to remove the override.
+
+**`severe (format-string &rest args)`** - Log a message at SEVERE level.
+The last keyword arguments :category and :data are extracted if present.
+
+**`trace (format-string &rest args)`** - Log a message at TRACE level.
+The last keyword arguments :category and :data are extracted if present.
+
+**`warn (format-string &rest args)`** - Log a message at WARN level.
+The last keyword arguments :category and :data are extracted if present.
+
+### Variables
+
+**`*backend*`** *(variable)* - The currently active log backend.
+
+**`*category-levels*`** *(variable)* - Per-category minimum log levels. Overrides *level* for specific categories.
+
+**`*level*`** *(variable)* - Minimum log level. Messages below this level are suppressed.
+
+**`*timestamp-format*`** *(variable)* - Timestamp format specification.
+
+**`+levels+`** *(variable)* - Log levels in ascending severity order.
+
+### Other
+
+**`entry-category`**
+
+**`entry-data`**
+
+**`entry-level`**
+
+**`entry-message`**
+
+**`entry-timestamp`**
 
 ---
 
@@ -1064,12 +1251,22 @@ IF-EXISTS may be :error (default) or :ignore.
 
 **`current-backend ()`** - Return the currently active database backend, signalling an error if none.
 
+**`delete-by-id (collection id)`** - Delete a single record by primary key (_id).
+Example: (db:delete-by-id "tracks" 7)
+
 **`drop (name)`** - Drop (delete) collection NAME and all its data.
 
 **`empty (name)`** - Remove all records from collection NAME.
 
 **`ensure-id (value)`** - Coerce VALUE to a database ID (positive integer).
 Accepts integers and strings containing integers.
+
+**`exists-p (collection query)`** - Return T if at least one record in COLLECTION matches QUERY.
+Example: (db:exists-p "users" (db:query (:= email "a@b.com")))
+
+**`find-by-id (collection id &key fields)`** - Find a single record by primary key (_id).
+Returns an alist or NIL if not found.
+Example: (db:find-by-id "users" 42)
 
 **`insert (collection data)`** - Insert DATA (an alist) into COLLECTION. Returns the new record's ID.
 Example: (db:insert "users" '(("name" . "Alice") ("role" . "admin")))
@@ -1534,6 +1731,303 @@ Does not consume a request.
 ### Variables
 
 **`*limits*`** *(variable)* - Registry of named rate limits, keyed by keyword.
+
+---
+
+## Cache - in-memory and persistent caching with TTL expiry
+
+Package: `fluxion.cache`
+
+### Class: `cache-backend`
+
+Abstract base class for cache backends.
+
+### Class: `db-cache-backend`
+
+Database-backed cache using fluxion.db.
+
+Slots:
+
+- **`table-name`**
+
+### Class: `memory-cache-backend`
+
+In-memory cache backend using a hash table.
+
+Slots:
+
+- **`store`**
+- **`lock`**
+
+### Generic Functions
+
+**`cache-clear (backend)`** - Remove all cache entries.
+
+**`cache-exists-p (backend name &optional variant)`** - Return T if a non-expired entry exists for NAME and optional VARIANT.
+
+**`cache-get (backend name &optional variant)`** - Retrieve a cached entry for NAME and optional VARIANT.
+Returns the cache-entry struct or NIL.
+
+**`cache-put (backend name value &key variant ttl)`** - Store VALUE under NAME with optional VARIANT and TTL (seconds).
+
+**`cache-remove (backend name &optional variant)`** - Remove the cache entry for NAME and optional VARIANT.
+
+### Macros
+
+**`with-cache ((name &optional ttl variant) &body body)`** *(macro)* - Execute BODY and cache the result under NAME.
+If a valid cached value exists, return it without executing BODY.
+TTL is the time-to-live in seconds (NIL = no expiry).
+VARIANT allows multiple cached values under the same NAME.
+
+### Functions
+
+**`clear ()`** - Remove all cache entries.
+
+**`exists-p (name &optional variant)`** - Return T if a non-expired cache entry exists for NAME.
+
+**`gc-expired ()`** - Remove all expired cache entries. Returns count removed.
+
+**`get (name &optional variant)`** - Retrieve the cached value for NAME (and optional VARIANT).
+Returns the value and T as second value if found, or NIL NIL if not cached.
+
+**`make-db-cache-backend (&key (table-name fluxion_cache))`** - Create a database-backed cache backend.
+
+**`make-memory-cache-backend ()`** - Create a new in-memory cache backend.
+
+**`put (name value &key variant ttl)`** - Store VALUE under NAME with optional VARIANT and TTL (seconds).
+Returns VALUE.
+
+**`remove (name &optional variant)`** - Remove the cached entry for NAME (and optional VARIANT).
+
+**`renew (name &optional variant)`** - Invalidate the cached entry for NAME (and optional VARIANT).
+Alias for REMOVE.
+
+**`setup (&optional (backend *backend*))`** - Create the cache table if it does not exist. Idempotent.
+
+### Variables
+
+**`*backend*`** *(variable)* - The currently active cache backend.
+
+---
+
+## Mail - email sending with templates and SMTP support
+
+Package: `fluxion.mail`
+
+### Class: `log-mail-backend`
+
+Mail backend that logs messages to a stream. Useful for development and testing.
+
+Slots:
+
+- **`stream`**
+- **`messages`**
+
+### Class: `mail-backend`
+
+Abstract base class for mail backends.
+
+### Class: `null-mail-backend`
+
+Mail backend that silently discards all messages.
+
+### Class: `sendmail-mail-backend`
+
+Mail backend using the sendmail command-line tool.
+
+Slots:
+
+- **`command`**
+
+### Class: `smtp-mail-backend`
+
+SMTP mail backend. Requires cl-smtp to be loaded.
+
+Slots:
+
+- **`host`**
+- **`port`**
+- **`ssl`**
+- **`username`**
+- **`password`**
+
+### Generic Functions
+
+**`backend-log (object)`**
+
+**`backend-send (backend to subject body &key from html-p headers)`** - Send an email via BACKEND.
+TO is a string (single recipient) or list of strings.
+SUBJECT is the email subject.
+BODY is the email body text.
+FROM is the sender address (defaults to *from*).
+HTML-P if true, the body is HTML.
+HEADERS is an alist of additional headers.
+
+### Functions
+
+**`make-log-mail-backend (&key (stream *standard-output*))`** - Create a logging mail backend.
+
+**`make-null-mail-backend ()`** - Create a null mail backend that discards all messages.
+
+**`make-sendmail-mail-backend (&key (command /usr/sbin/sendmail))`** - Create a sendmail mail backend.
+
+**`make-smtp-mail-backend (&key (host localhost) (port 25) ssl username password)`** - Create an SMTP mail backend.
+
+**`send (to subject body &key from html-p headers)`** - Send an email.
+TO is a string or list of strings (recipients).
+SUBJECT is the email subject line.
+BODY is the email body.
+FROM overrides the default *from* address.
+HTML-P if true, the body is HTML content.
+HEADERS is an alist of additional email headers.
+
+### Variables
+
+**`*backend*`** *(variable)* - The currently active mail backend. Defaults to log backend.
+
+**`*from*`** *(variable)* - Default sender address for outgoing mail.
+
+**`*on-send*`** *(variable)* - Hook function called before sending. Receives (to subject body &key from html-p headers).
+Return NIL to abort the send.
+
+---
+
+## Profile - request profiling and performance measurement
+
+Package: `fluxion.profile`
+
+### Functions
+
+**`all-fields (username)`** - Return an alist of all profile field values for USERNAME.
+Keys are field names (without the profile. prefix).
+
+**`avatar-url (username &key (size *default-avatar-size*) (default identicon))`** - Return a Gravatar URL for USERNAME.
+Uses the user's email field if available, otherwise hashes the username.
+SIZE is the image size in pixels. DEFAULT is the fallback image type.
+
+**`define-field (name &key (type text) (visibility public) label validator)`** - Define a profile field that users can populate.
+TYPE is one of :text, :url, :date, :boolean, :integer.
+VISIBILITY is :public or :private.
+LABEL is a human-readable name (defaults to NAME).
+VALIDATOR is an optional function that receives a value and returns T if valid.
+
+**`define-panel (name &key (label name) (order 0) renderer)`** - Register a profile panel.
+NAME is a unique string identifier.
+LABEL is the human-readable title.
+ORDER controls display ordering (lower first).
+RENDERER is a function (username) -> HTML string.
+
+**`defined-fields ()`** - Return a list of all defined field definitions.
+
+**`display-name (username)`** - Return the display name for USERNAME.
+Falls back to the username itself if no display name is set.
+
+**`field-definition (name)`** - Return the field-def for NAME, or NIL.
+
+**`get (username field-name)`** - Get the value of a profile field for USERNAME.
+
+**`panel-definition (name)`** - Return the panel-def for NAME, or NIL.
+
+**`panels ()`** - Return all registered panel definitions, sorted by order.
+
+**`public-fields (username)`** - Return an alist of public profile fields for USERNAME.
+Only includes fields that have a definition with :public visibility.
+
+**`remove (username field-name)`** - Remove a profile field value for USERNAME.
+
+**`set (username field-name value)`** - Set a profile field for USERNAME. Validates if a validator is defined.
+
+**`set-display-name (username name)`** - Set the display name for USERNAME.
+
+**`undefine-field (name)`** - Remove a profile field definition.
+
+**`undefine-panel (name)`** - Remove a profile panel definition.
+
+### Variables
+
+**`*default-avatar-size*`** *(variable)* - Default avatar size in pixels.
+
+---
+
+## Migrate - database schema migrations with version tracking
+
+Package: `fluxion.migrate`
+
+### Macros
+
+**`define-migration (module version &key up down (description ))`** *(macro)* - Define a migration for MODULE at VERSION.
+UP is a function to apply the migration.
+DOWN is an optional function to reverse it.
+
+### Functions
+
+**`clear-migrations (&optional module)`** - Clear registered migrations. If MODULE is given, clear only that module.
+
+**`current-version (module)`** - Return the highest applied migration version for MODULE, or 0.
+
+**`history (module)`** - Return the migration history for MODULE as an alist of rows.
+
+**`migrate (module &key (to nil))`** - Run all pending migrations for MODULE in version order.
+If TO is specified, only run up to and including that version.
+Returns the number of migrations applied.
+
+**`migrations-for (module)`** - Return the list of registered migrations for MODULE, sorted by version.
+
+**`pending (module)`** - Return a list of migration structs that have not yet been applied.
+
+**`rollback (module &key (steps 1))`** - Roll back the last STEPS applied migrations for MODULE.
+Returns the number of migrations rolled back.
+
+**`rollback-to (module target-version)`** - Roll back all migrations for MODULE above TARGET-VERSION.
+Returns the number of migrations rolled back.
+
+**`setup ()`** - Create the migrations tracking table. Idempotent.
+
+---
+
+## Client Runtime (JavaScript)
+
+Package: `fluxion.js` (served at `/static/fluxion.js`)
+
+These functions are available globally in the browser after loading the Fluxion client runtime.
+
+### Functions
+
+**`fluxionOnNavigate(callback)`** - Register a CALLBACK to be invoked after SPA content navigation.
+
+**`fluxionNavigated(container)`** - Notify Fluxion that SPA navigation has occurred on CONTAINER.
+
+**`fluxionGetCsrfToken()`** - Read the CSRF token from the meta tag in the page head.
+
+**`fluxionGetSignal(name)`**
+
+**`fluxionSetSignal(name value)`**
+
+**`fluxionGetAllSignals()`**
+
+**`fluxionPost(url &optional body callback retried)`** - Send a POST request to URL with optional JSON BODY.
+
+**`fluxionCollectParams(el)`** - Collect data-param-* attributes from EL into an object.
+
+**`fluxionMergeBody(el)`** - Build the POST body: signals merged with element data-param-* attributes.
+
+**`fluxionBindActions(&optional root)`** - Scan for data-on-* attributes and bind event listeners.
+
+### Data Attributes
+
+- **`data-on-click`** - URL to POST when element is clicked
+- **`data-on-submit`** - URL to POST when form is submitted
+- **`data-on-change`** - URL to POST when input value changes
+- **`data-on-input`** - URL to POST on each input keystroke
+- **`data-on-keydown`** - URL to POST on keydown (filters by data-key)
+- **`data-param-*`** - Parameters collected and sent with the POST body
+- **`data-bind`** - Two-way signal binding for input elements
+- **`data-text`** - One-way text binding from signal to element content
+- **`data-confirm`** - Confirmation prompt before executing action
+
+### Signals
+
+Signals are client-side reactive state that persist across morphs and are automatically included in POST request bodies.
 
 ---
 

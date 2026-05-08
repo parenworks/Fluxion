@@ -58,6 +58,19 @@ Override or wrap with :around methods for custom content types."))
          (content-type (guess-content-type relative)))
     (serve-static-file filepath content-type)))
 
+(defun serve-favicon (app)
+  "Serve a favicon from the app's static directory.
+Searches for favicon.ico, favicon.svg, and favicon.png in order."
+  (let ((static-dir (or (app-static-dir app)
+                        (asdf:system-relative-pathname "fluxion" "static/"))))
+    (loop for (name . ctype) in '(("favicon.ico" . "image/x-icon")
+                                   ("favicon.svg" . "image/svg+xml")
+                                   ("favicon.png" . "image/png"))
+          for path = (merge-pathnames name static-dir)
+          when (probe-file path)
+            return (list 200 (list :content-type ctype) (pathname path))
+          finally (return (list 404 '(:content-type "text/plain") '("Not Found"))))))
+
 (defun guess-content-type (filename)
   "Guess content-type from file extension."
   (let ((ext (pathname-type (pathname filename))))
@@ -177,6 +190,10 @@ HTML page response."
           ;; Static files (no session needed)
           ((alexandria:starts-with-subseq "/static/" path)
            (finish-request (static-file-handler app env)))
+
+          ;; Favicon (check static dir for common favicon files)
+          ((string= path "/favicon.ico")
+           (finish-request (serve-favicon app)))
 
           ;; Everything else needs a session
           (t

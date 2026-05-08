@@ -90,7 +90,8 @@ Requires *current-session* to be bound (i.e. called within a request)."
     (let ((session fluxion.server:*current-session*))
       (setf (fluxion.server:session-user session) user-row)
       (setf (fluxion.server:session-user-roles session)
-            (user:permissions username))
+            (mapcar (lambda (p) (intern (string-upcase p) :keyword))
+                    (user:permissions username)))
       ;; Regenerate CSRF token on auth change
       (setf (fluxion.server:session-csrf-token session)
             (ironclad:byte-array-to-hex-string (ironclad:random-data 16)))

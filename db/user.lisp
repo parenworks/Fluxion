@@ -233,7 +233,8 @@ Returns an alist with \"_id\", \"username\", \"password_hash\" keys, or NIL."
 
 (defun user-password-hash (user-alist)
   "Return the password hash from a user alist."
-  (cdr (assoc "password_hash" user-alist :test #'string=)))
+  (or (cdr (assoc "password-hash" user-alist :test #'string=))
+      (cdr (assoc "password_hash" user-alist :test #'string=))))
 
 (defun user= (a b)
   "Return T if two user references identify the same user.

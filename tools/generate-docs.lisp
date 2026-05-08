@@ -25,11 +25,14 @@
 (defparameter *packages-to-document*
   '("FLUXION.COMPONENTS" "FLUXION.CELLS" "FLUXION.SERVER"
     "FLUXION.EVENTS" "FLUXION.PROTOCOL" "FLUXION.RENDER"
-    "FLUXION.VALIDATION" "FLUXION.CLIENT" "FLUXION"
+    "FLUXION.VALIDATION" "FLUXION.HOOKS" "FLUXION.LOG"
+    "FLUXION.CLIENT" "FLUXION"
     "FLUXION.DB" "FLUXION.DB.QUERY" "FLUXION.DB.MODEL"
     "FLUXION.RDB" "FLUXION.SESSION.DB"
     "FLUXION.USER" "FLUXION.AUTH"
-    "FLUXION.BAN" "FLUXION.RATE")
+    "FLUXION.BAN" "FLUXION.RATE"
+    "FLUXION.CACHE" "FLUXION.MAIL" "FLUXION.PROFILE"
+    "FLUXION.MIGRATE")
   "Packages to include in the generated documentation, in order.")
 
 (defparameter *package-descriptions*
@@ -40,6 +43,8 @@
     ("FLUXION.PROTOCOL" . "Protocol - low-level SSE formatting")
     ("FLUXION.RENDER" . "Render - HTML page rendering helpers")
     ("FLUXION.VALIDATION" . "Validation - server-side form validation")
+    ("FLUXION.HOOKS" . "Hooks - inter-module event communication with triggers, priorities, and switches")
+    ("FLUXION.LOG" . "Log - structured logging with categories and levels")
     ("FLUXION.CLIENT" . "Client - Parenscript runtime compilation")
     ("FLUXION" . "Umbrella Package (fluxion / fx) - re-exports key symbols")
     ("FLUXION.DB" . "Database - backend protocol, connection management, collection CRUD, query DSL")
@@ -50,7 +55,11 @@
     ("FLUXION.USER" . "User System - accounts, extensible fields, hierarchical permissions")
     ("FLUXION.AUTH" . "Authentication - login/logout, session-to-user binding, hooks")
     ("FLUXION.BAN" . "Ban System - IP-based access control with database persistence")
-    ("FLUXION.RATE" . "Rate Limiting - named per-resource limits with per-client tracking"))
+    ("FLUXION.RATE" . "Rate Limiting - named per-resource limits with per-client tracking")
+    ("FLUXION.CACHE" . "Cache - in-memory and persistent caching with TTL expiry")
+    ("FLUXION.MAIL" . "Mail - email sending with templates and SMTP support")
+    ("FLUXION.PROFILE" . "Profile - request profiling and performance measurement")
+    ("FLUXION.MIGRATE" . "Migrate - database schema migrations with version tracking"))
   "Human-readable descriptions for each documented package.")
 
 ;;; -------------------------------------------------------
@@ -246,6 +255,118 @@
       (format stream "---~%~%"))))
 
 ;;; -------------------------------------------------------
+;;; Client-side JavaScript API extraction
+;;; -------------------------------------------------------
+
+(defparameter *client-runtime-path*
+  (asdf:system-relative-pathname "fluxion" "client/runtime.lisp")
+  "Path to the Parenscript client runtime source.")
+
+(defparameter *public-client-functions*
+  '("fluxion-on-navigate" "fluxion-navigated" "fluxion-get-csrf-token"
+    "fluxion-get-signal" "fluxion-set-signal" "fluxion-get-all-signals"
+    "fluxion-post" "fluxion-bind-actions" "fluxion-collect-params"
+    "fluxion-merge-body")
+  "Client functions considered public API (Parenscript names).")
+
+(defun ps-name-to-js (name)
+  "Convert a Parenscript-style name to camelCase JavaScript name.
+E.g. fluxion-bind-actions -> fluxionBindActions"
+  (let ((parts (uiop:split-string name :separator "-"))
+        (result ""))
+    (loop for part in parts
+          for i from 0
+          do (setf result
+                   (concatenate 'string result
+                                (if (zerop i)
+                                    part
+                                    (concatenate 'string
+                                                 (string-upcase (subseq part 0 1))
+                                                 (subseq part 1))))))
+    result))
+
+(defun extract-client-functions ()
+  "Parse the Parenscript runtime source and extract public function docs.
+Returns a list of (js-name params docstring) tuples."
+  (let ((results '()))
+    (with-open-file (in *client-runtime-path* :direction :input
+                                              :external-format :utf-8)
+      (let ((lines (loop for line = (read-line in nil nil)
+                         while line collect line)))
+        (loop for i from 0 below (length lines)
+              for line = (nth i lines)
+              when (and (search "(defun fluxion-" line)
+                        (not (search "(defun fluxion-handle-" line))
+                        (not (search "(defun fluxion-patch-" line))
+                        (not (search "(defun fluxion-morph-" line))
+                        (not (search "(defun fluxion-sync-" line))
+                        (not (search "(defun fluxion-parse-" line))
+                        (not (search "(defun fluxion-dispatch-" line))
+                        (not (search "(defun fluxion-schedule-" line))
+                        (not (search "(defun fluxion-connect-" line))
+                        (not (search "(defun fluxion-init" line))
+                        (not (search "(defun fluxion-update-" line)))
+                do (let* ((trimmed (string-trim " " line))
+                          (open-paren (position #\( trimmed :start 7))
+                          (name-end (or open-paren (length trimmed)))
+                          (ps-name (string-trim " " (subseq trimmed 7 name-end)))
+                          (params ""))
+                     ;; Extract params from same line or next
+                     (when open-paren
+                       (let ((close (position #\) trimmed :start open-paren)))
+                         (when close
+                           (setf params (subseq trimmed (1+ open-paren) close)))))
+                     ;; Check if next line is a docstring
+                     (let ((docstring nil))
+                       (when (< (1+ i) (length lines))
+                         (let ((next (string-trim " " (nth (1+ i) lines))))
+                           (when (and (plusp (length next))
+                                      (char= (char next 0) #\"))
+                             (setf docstring
+                                   (string-trim "\""
+                                                (if (search "\"" next :start2 1)
+                                                    next
+                                                    next))))))
+                       ;; Only include public functions
+                       (when (member ps-name *public-client-functions*
+                                     :test #'string=)
+                         (push (list (ps-name-to-js ps-name) params
+                                     (or docstring ""))
+                               results)))))))
+    (nreverse results)))
+
+(defun write-client-api-section (stream)
+  "Write the client-side JavaScript API section."
+  (format stream "## Client Runtime (JavaScript)~%~%")
+  (format stream "Package: `fluxion.js` (served at `/static/fluxion.js`)~%~%")
+  (format stream "These functions are available globally in the browser after ")
+  (format stream "loading the Fluxion client runtime.~%~%")
+  (format stream "### Functions~%~%")
+  (let ((fns (extract-client-functions)))
+    (if fns
+        (dolist (entry fns)
+          (destructuring-bind (js-name params doc) entry
+            (format stream "**`~A(~A)`**" js-name params)
+            (when (plusp (length doc))
+              (format stream " - ~A" doc))
+            (format stream "~%~%")))
+        (format stream "*No public client functions found.*~%~%")))
+  (format stream "### Data Attributes~%~%")
+  (format stream "- **`data-on-click`** - URL to POST when element is clicked~%")
+  (format stream "- **`data-on-submit`** - URL to POST when form is submitted~%")
+  (format stream "- **`data-on-change`** - URL to POST when input value changes~%")
+  (format stream "- **`data-on-input`** - URL to POST on each input keystroke~%")
+  (format stream "- **`data-on-keydown`** - URL to POST on keydown (filters by data-key)~%")
+  (format stream "- **`data-param-*`** - Parameters collected and sent with the POST body~%")
+  (format stream "- **`data-bind`** - Two-way signal binding for input elements~%")
+  (format stream "- **`data-text`** - One-way text binding from signal to element content~%")
+  (format stream "- **`data-confirm`** - Confirmation prompt before executing action~%~%")
+  (format stream "### Signals~%~%")
+  (format stream "Signals are client-side reactive state that persist across morphs ")
+  (format stream "and are automatically included in POST request bodies.~%~%")
+  (format stream "---~%~%"))
+
+;;; -------------------------------------------------------
 ;;; Public API
 ;;; -------------------------------------------------------
 
@@ -269,7 +390,9 @@
                       (unless (member type '(:class :condition))
                         (format s "### ~A~%~%" (type-heading type))))
                     (write-symbol-entry s sym type))))
-              (format s "---~%~%")))))))
+              (format s "---~%~%")))))
+    ;; Client-side API section
+    (write-client-api-section s)))
 
 (defun generate (&key (output-path nil))
   "Generate API.md from live package introspection.
