@@ -173,6 +173,21 @@ Booleans become 0/1. NIL becomes :null."
       (dolist (sql (q:compile-alter-table name new-cols))
         (%execute backend sql)))))
 
+(defmethod db:%ensure-index ((backend sqlite-backend) collection index-name fields
+                             &key unique method)
+  "Create an index on COLLECTION named INDEX-NAME covering FIELDS if it does not exist.
+SQLite does not support the METHOD (index type) option; it is ignored."
+  (declare (ignore method))
+  (let* ((unique-kw (if unique "UNIQUE " ""))
+         (col-list  (format nil "~{~A~^, ~}"
+                            (mapcar #'q:quote-identifier fields)))
+         (sql (format nil "CREATE ~AINDEX IF NOT EXISTS ~A ON ~A (~A)"
+                      unique-kw
+                      (q:quote-identifier index-name)
+                      (q:quote-identifier collection)
+                      col-list)))
+    (%execute backend sql)))
+
 (defmethod db:%collection-structure ((backend sqlite-backend) name)
   (let ((rows (%query-rows backend
                 (format nil "PRAGMA table_info(~A)" (q:quote-identifier name)))))
@@ -225,6 +240,23 @@ Booleans become 0/1. NIL becomes :null."
   (declare (ignore skip amount sort))
   (let ((compiled (q:compile-update collection query data)))
     (%execute backend (car compiled) (cdr compiled))))
+
+(defmethod db:%select-query ((backend sqlite-backend) sql params)
+  "Execute a parameterised SELECT string and return string-keyed alist rows."
+  (%query-rows backend sql params))
+
+(defmethod db:%update-expr ((backend sqlite-backend) collection query data)
+  "UPDATE with mixed literal and expression values for SQLite.
+:expr values are not supported and are silently dropped; only literal
+pairs are applied.  Use this method where full-text search columns
+(which are PostgreSQL-only) co-exist with portable literal updates."
+  (let ((literal-data (remove-if (lambda (pair)
+                                   (and (consp (cdr pair))
+                                        (eq (car (cdr pair)) :expr)))
+                                 data)))
+    (when literal-data
+      (let ((compiled (q:compile-update collection query literal-data)))
+        (%execute backend (car compiled) (cdr compiled))))))
 
 (defmethod db:%remove ((backend sqlite-backend) collection query
                         &key skip amount sort)

@@ -101,6 +101,12 @@
    #:%empty
    #:%alter
    #:%collection-structure
+   #:select-query
+   #:%select-query
+   #:update-expr
+   #:%update-expr
+   #:ensure-index
+   #:%ensure-index
    #:%insert
    #:%select
    #:%count

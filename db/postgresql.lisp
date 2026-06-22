@@ -200,14 +200,19 @@ Uses Postmodern's sql-escape for strings."
 ;;; -------------------------------------------------------
 
 (defun field-type-pg (type)
-  "Convert a portable field type keyword to PostgreSQL type string."
-  (ecase type
-    (:text "TEXT")
-    (:integer "INTEGER")
-    (:bigint "BIGINT")
-    (:float "DOUBLE PRECISION")
-    (:boolean "BOOLEAN")
-    (:timestamp "TIMESTAMP")))
+  "Convert a portable field type keyword to a PostgreSQL type string.
+If TYPE is already a string it is passed through verbatim, allowing
+callers to use native PostgreSQL type names (e.g. \"tsvector\", \"jsonb\")
+that have no portable keyword equivalent."
+  (if (stringp type)
+      type
+      (ecase type
+        (:text "TEXT")
+        (:integer "INTEGER")
+        (:bigint "BIGINT")
+        (:float "DOUBLE PRECISION")
+        (:boolean "BOOLEAN")
+        (:timestamp "TIMESTAMP"))))
 
 (defun pg-type-to-keyword (pg-type)
   "Convert a PostgreSQL type name back to a Fluxion field-type keyword."
@@ -298,6 +303,24 @@ Uses SERIAL for auto-incrementing primary key."
                            (string= "_id" (first row)))
                          rows)))))
 
+(defmethod db:%ensure-index ((backend postgresql-backend) collection index-name fields
+                             &key unique method)
+  "Create an index on COLLECTION named INDEX-NAME covering FIELDS if it does not exist.
+Uses CREATE INDEX IF NOT EXISTS so it is safe to call on every restart.
+UNIQUE creates a UNIQUE index.  METHOD (e.g. \"GIN\") sets the index type."
+  (let* ((using   (when method (format nil " USING ~A" method)))
+         (unique-kw (if unique "UNIQUE " ""))
+         (col-list  (format nil "~{~A~^, ~}"
+                            (mapcar #'q:quote-identifier fields)))
+         (sql (format nil "CREATE ~AINDEX IF NOT EXISTS ~A ON ~A~A (~A)"
+                      unique-kw
+                      (q:quote-identifier index-name)
+                      (q:quote-identifier collection)
+                      (or using "")
+                      col-list)))
+    (with-pg-conn backend
+      (pomo:execute sql))))
+
 ;;; -------------------------------------------------------
 ;;; Data operations
 ;;; -------------------------------------------------------
@@ -359,6 +382,43 @@ Uses SERIAL for auto-incrementing primary key."
                                   (format result "$~D" (incf counter))
                                   (write-char ch result)))
                      (get-output-stream-string result)))
+         (sql (format nil "UPDATE ~A SET ~{~A~^, ~} WHERE ~A"
+                      (q:quote-identifier collection) set-parts pg-where)))
+    (%execute backend sql all-params)))
+
+(defmethod db:%select-query ((backend postgresql-backend) sql params)
+  "Execute a parameterised SELECT string and return string-keyed alist rows."
+  (%query-rows backend sql params))
+
+(defmethod db:%update-expr ((backend postgresql-backend) collection query data)
+  "UPDATE with mixed literal and expression values.
+Each element of DATA is (field . value) where value is either a literal
+or (:expr \"sql-string\") to inline SQL verbatim (e.g. a function call)."
+  (let* ((literal-params nil)
+         (param-counter  0)
+         (set-parts
+          (mapcar (lambda (pair)
+                    (let ((col (car pair))
+                          (val (cdr pair)))
+                      (if (and (consp val) (eq (car val) :expr))
+                          (format nil "~A = ~A" (q:quote-identifier col) (cadr val))
+                          (progn
+                            (push val literal-params)
+                            (format nil "~A = $~D"
+                                    (q:quote-identifier col)
+                                    (incf param-counter))))))
+                  data))
+         (literal-params (nreverse literal-params))
+         (where-params   (cdr query))
+         (where-sql      (car query))
+         (pg-where (let ((counter param-counter)
+                         (result (make-string-output-stream)))
+                     (loop for ch across where-sql
+                           do (if (char= ch #\?)
+                                  (format result "$~D" (incf counter))
+                                  (write-char ch result)))
+                     (get-output-stream-string result)))
+         (all-params (append literal-params where-params))
          (sql (format nil "UPDATE ~A SET ~{~A~^, ~} WHERE ~A"
                       (q:quote-identifier collection) set-parts pg-where)))
     (%execute backend sql all-params)))

@@ -183,6 +183,25 @@ FUNCTION receives an alist for each record."))
   (:documentation "Execute THUNK within a database transaction.
 Commits on normal return, rolls back on error."))
 
+(defgeneric %select-query (backend sql params)
+  (:documentation "Execute a parameterised SQL SELECT string SQL with PARAMS and return
+a list of string-keyed alists, one per row.  Use only when the query DSL
+cannot express the required predicate (e.g. full-text search operators).
+PARAMS is a list of values bound to positional placeholders ($1, $2, ...)."))
+
+(defgeneric %update-expr (backend collection query data)
+  (:documentation "Update COLLECTION records matching QUERY using DATA, where each element
+of DATA is (field-name . value).  Value may be a literal or a cons
+(:expr \"sql-expression\") to embed a raw SQL fragment in the SET clause.
+Only literal values are passed as query parameters; :expr values are
+inlined verbatim.  Use with care: :expr strings must be trusted content."))
+
+(defgeneric %ensure-index (backend collection index-name fields &key unique method)
+  (:documentation "Create an index on COLLECTION named INDEX-NAME covering FIELDS if it does
+not already exist. UNIQUE, if T, creates a unique index. METHOD is a
+backend-specific index type string (e.g. \"GIN\" for PostgreSQL full-text
+search). Implementations must be idempotent."))
+
 ;;; Public API
 
 (defun insert (collection data)
@@ -223,6 +242,28 @@ Example: (db:remove \"users\" (db:query (:= name \"test\")))"
 Example: (db:iterate \"users\" (db:query :all) #'print)"
   (%iterate (%ensure-connected) (string collection) query function
             :fields fields :skip skip :amount amount :sort sort :unique unique))
+
+(defun select-query (sql &optional params)
+  "Execute a parameterised SQL SELECT string SQL with optional PARAMS list.
+Returns a list of string-keyed alists, one per row.
+Use only when the query DSL cannot express the required predicate."
+  (%select-query (%ensure-connected) sql (or params nil)))
+
+(defun update-expr (collection query data)
+  "Update COLLECTION records matching QUERY using DATA.
+Each element of DATA is (field-name . value).
+Use (:expr \"sql\") as the value to inline a SQL expression verbatim.
+Example: (db:update-expr \"posts\" q '((\"search_vector\" . (:expr \"to_tsvector('english', \\\"body\\\")\"))))"
+  (%update-expr (%ensure-connected) (string collection) query data))
+
+(defun ensure-index (collection index-name fields &key unique method)
+  "Create an index on COLLECTION named INDEX-NAME covering FIELDS if it does not exist.
+FIELDS is a list of field name symbols or strings.
+UNIQUE, if T, creates a UNIQUE index.
+METHOD is a backend-specific type string (e.g. \"GIN\" for PostgreSQL).
+Safe to call on every restart; existing indexes are left untouched."
+  (%ensure-index (%ensure-connected) (string collection) (string index-name)
+                 fields :unique unique :method method))
 
 (defmacro with-transaction (() &body body)
   "Execute BODY within a database transaction.
