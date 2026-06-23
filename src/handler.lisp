@@ -23,7 +23,12 @@ Override or wrap with :around methods for custom content types."))
                           while byte do (vector-push-extend byte buf))
                     (babel:octets-to-string buf :encoding :utf-8))))
             (when (and body-string (plusp (length body-string)))
-              (cl-json:decode-json-from-string body-string)))
+              (let ((decoded (cl-json:decode-json-from-string body-string)))
+                (mapcar (lambda (pair)
+                          (cons (substitute #\_ #\-
+                                            (string-downcase (symbol-name (car pair))))
+                                (cdr pair)))
+                        decoded))))
         (error () nil)))))
 
 (defun get-request-path (env)
