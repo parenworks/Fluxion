@@ -139,9 +139,11 @@ Serializes access via the backend lock to prevent concurrent query errors."
 
 (defun %coerce-param (value)
   "Coerce a Lisp value to a string for cl-postgres parameterized queries.
-cl-postgres parameters must be strings, :null, or NIL."
+cl-postgres parameters must be strings, :null, or NIL.
+Postmodern returns :NULL (keyword) for SQL NULLs; treat it the same as CL NIL."
   (cond
     ((null value) :null)
+    ((eq value :null) :null)
     ((eq value t) "true")
     ((stringp value) value)
     ((integerp value) (format nil "~D" value))
@@ -159,17 +161,22 @@ cl-postgres parameters must be strings, :null, or NIL."
 
 (defun %keyword-alist-to-string-alist (alist)
   "Convert a postmodern keyword-keyed alist to string-keyed alist.
-Converts :NAME to \"name\" and :-ID to \"_id\"."
+Converts :NAME to \"name\" and :-ID to \"_id\".
+Postmodern maps SQL underscores to Lisp hyphens (e.g. CHANNEL_ID becomes
+:CHANNEL-ID), so hyphens in the symbol name are converted back to underscores,
+except for a leading hyphen which maps to a leading underscore."
   (mapcar (lambda (pair)
             (let* ((key-str (symbol-name (car pair)))
+                   (lowered (string-downcase key-str))
                    (str (cond
                           ;; :-ID becomes _id
                           ((string= key-str "-ID") "_id")
-                          ;; Leading dash becomes underscore
-                          ((and (> (length key-str) 0)
-                                (char= (char key-str 0) #\-))
-                           (concatenate 'string "_" (string-downcase (subseq key-str 1))))
-                          (t (string-downcase key-str)))))
+                          ;; Leading dash becomes underscore, rest hyphens to underscores
+                          ((and (> (length lowered) 0)
+                                (char= (char lowered 0) #\-))
+                           (substitute #\_ #\-
+                                       (concatenate 'string "_" (subseq lowered 1))))
+                          (t (substitute #\_ #\- lowered)))))
               (cons str (cdr pair))))
           alist))
 

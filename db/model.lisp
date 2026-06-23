@@ -100,7 +100,8 @@ If ALIST contains an \"_id\" key, it is set as the model ID."
       (setf (model-id model) (fluxion.db:ensure-id id-val)))
     (dolist (pair alist model)
       (unless (string= "_id" (car pair))
-        (setf (model-field model (car pair)) (cdr pair))))))
+        (setf (model-field model (car pair))
+              (if (eq (cdr pair) :null) nil (cdr pair)))))))
 
 ;;; -------------------------------------------------------
 ;;; CRUD operations
