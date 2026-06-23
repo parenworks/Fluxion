@@ -39,6 +39,16 @@ Override or wrap with :around methods for custom content types."))
   "Extract the request method keyword from Clack ENV."
   (getf env :request-method :get))
 
+(defun parse-query-string (env)
+  "Parse QUERY-STRING from Clack ENV into an alist of (string . string) pairs."
+  (let ((qs (getf env :query-string "")))
+    (when (and qs (plusp (length qs)))
+      (loop for pair in (uiop:split-string qs :separator "&")
+            for eq-pos = (position #\= pair)
+            when eq-pos
+              collect (cons (subseq pair 0 eq-pos)
+                            (subseq pair (1+ eq-pos)))))))
+
 ;;; -------------------------------------------------------
 ;;; Static file serving
 ;;; -------------------------------------------------------
@@ -259,7 +269,8 @@ HTML page response."
                        ;; CLOS component actions (POST /action/component-id/action-name)
                        ((and (eq method :post)
                              (alexandria:starts-with-subseq "/action/" path))
-                        (let ((params (parse-request-body env)))
+                        (let ((params (append (parse-query-string env)
+                                              (parse-request-body env))))
                           (or (dispatch-component-action app path params :session session)
                               (list 404
                                     '(:content-type "text/plain")
