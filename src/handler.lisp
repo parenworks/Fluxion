@@ -322,7 +322,8 @@ HTML page response."
 
 (defmethod start ((app fluxion-app) page-handler &key (port nil port-supplied-p)
                                                       (server nil server-supplied-p)
-                                                      (address "127.0.0.1"))
+                                                      (address "127.0.0.1")
+                                                      (debug t))
   (when port-supplied-p
     (setf (app-port app) port))
   (when server-supplied-p
@@ -333,7 +334,8 @@ HTML page response."
           (clack:clackup clack-app
                          :port (app-port app)
                          :server (app-server app)
-                         :address address))
+                         :address address
+                         :debug debug))
     (start-session-reaper app)
     app))
 
