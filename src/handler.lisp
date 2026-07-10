@@ -248,7 +248,7 @@ HTML page response."
                                        (unwind-protect
                                             (handler-case
                                                 (loop until (eq-closed-p queue) do
-                                                  (let ((events (dequeue-all-events queue :timeout 15)))
+                                                  (let ((events (dequeue-all-events queue :timeout 5)))
                                                     (if events
                                                         (dolist (event events)
                                                           (funcall writer (format-sse-event event)))
